@@ -81,6 +81,8 @@ const mkClient = (w: WalletEntry) => createWalletClient({ account: getAccount(w)
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
 
+const TEMPO_STABLE_SEND_BUFFER = '0.005'
+
 function resolveToken(s: string) {
   const t = TOKENS[s]
   if (t) return t
@@ -410,11 +412,41 @@ async function handle(name: string, args: Record<string, unknown>) {
         const sym = (args.token as string) || 'USDC.e'
         const memo = args.memo as string | undefined
         const tok = resolveToken(sym)
-        const parsed = parseUnits(String(amount), tok.decimals)
+        const requested = parseUnits(String(amount), tok.decimals)
+        const balance = await pub().readContract({ address: tok.address, abi: tip20Abi, functionName: 'balanceOf', args: [w.address] }) as bigint
+        if (requested > balance) {
+          return err(`Insufficient ${tok.symbol}. Requested ${formatUnits(requested, tok.decimals)}, available ${formatUnits(balance, tok.decimals)}.`)
+        }
+
+        const buffer = tok.type === 'stablecoin' ? parseUnits(TEMPO_STABLE_SEND_BUFFER, tok.decimals) : 0n
+        if (buffer > 0n && balance <= buffer) {
+          return err(`Not enough spendable ${tok.symbol}. Balance is ${formatUnits(balance, tok.decimals)}, but Tempo exact-balance sends need a tiny buffer for network/accounting fees.`)
+        }
+
+        const maxSpendable = buffer > 0n ? balance - buffer : balance
+        const parsed = requested > maxSpendable ? maxSpendable : requested
+        const adjusted = parsed !== requested
+
+        try {
+          if (memo) {
+            await pub().simulateContract({ address: tok.address, abi: tip20Abi, functionName: 'transferWithMemo', args: [to, parsed, pad(stringToHex(memo), { size: 32 })], account: getAccount(w) })
+          } else {
+            await pub().simulateContract({ address: tok.address, abi: tip20Abi, functionName: 'transfer', args: [to, parsed], account: getAccount(w) })
+          }
+        } catch (e) {
+          return err(`Transfer simulation failed before sending. No transaction was submitted. Reason: ${e instanceof Error ? e.message : String(e)}`)
+        }
 
         const hash = memo
           ? await client.writeContract({ address: tok.address, abi: tip20Abi, functionName: 'transferWithMemo', args: [to, parsed, pad(stringToHex(memo), { size: 32 })] })
           : await client.writeContract({ address: tok.address, abi: tip20Abi, functionName: 'transfer', args: [to, parsed] })
+
+        const receipt = await pub().waitForTransactionReceipt({ hash, timeout: 60_000 })
+        if (receipt.status !== 'success') {
+          return err(`Transfer reverted on-chain.\nTx: ${TEMPO_CHAIN.explorer}/tx/${hash}`)
+        }
+
+        return text(`Payment sent!\nAmount: ${formatUnits(parsed, tok.decimals)} ${sym}${adjusted ? `\nAdjusted from requested ${formatUnits(requested, tok.decimals)} ${sym} to keep a tiny Tempo fee buffer.` : ''}\nTo: ${to}\n${memo ? `Memo: ${memo}\n` : ''}Gas: ~0.001 USD (sponsored)\nTx: ${TEMPO_CHAIN.explorer}/tx/${hash}`)
 
         return text(`✅ Payment sent!\nAmount: ${amount} ${sym}\nTo: ${to}\n${memo ? `Memo: ${memo}\n` : ''}Gas: ~0.001 USD (sponsored)\nTx: ${TEMPO_CHAIN.explorer}/tx/${hash}`)
       }
