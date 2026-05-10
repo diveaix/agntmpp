@@ -1076,7 +1076,7 @@ app.get('/stats', (_req, res) => {
 
 // ─── A2A Protocol ─────────────────────────────────────────
 
-const port = parseInt(process.env.AGNT_PORT || '3001', 10)
+const port = parseInt(process.env.AGNT_PORT || process.env.PORT || '3001', 10)
 
 app.get('/agent-card', (_req, res) => {
   try {
