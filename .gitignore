@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.agnt/
+*.enc
+*.log
+.DS_Store
+docs/
+skills/

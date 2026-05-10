@@ -1,0 +1,43 @@
+.hackathon-disabled-page {
+  width: min(960px, calc(100% - 34px));
+  min-height: 72vh;
+  margin: 0 auto;
+  padding: 132px 0 72px;
+  display: grid;
+  place-items: center;
+}
+
+.hackathon-disabled-panel {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .025);
+  padding: 42px;
+  text-align: center;
+  display: grid;
+  gap: 18px;
+}
+
+.hackathon-disabled-panel h1 {
+  font-family: var(--display);
+  font-size: clamp(30px, 5vw, 58px);
+  line-height: 1.05;
+  margin: 0;
+  color: var(--white);
+}
+
+.hackathon-disabled-panel p {
+  max-width: 640px;
+  margin: 0 auto;
+  color: var(--g5);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.hackathon-disabled-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}

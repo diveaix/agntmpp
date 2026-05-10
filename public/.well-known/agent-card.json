@@ -1,0 +1,79 @@
+{
+  "name": "./AGNT Protocol",
+  "description": "Agent-native DeFi toolkit — 56+ MCP tools for autonomous swaps, bridges, lending, perps, yield, and market intelligence across Tempo, Ethereum, Arbitrum, Base, and more.",
+  "url": "http://localhost:3000",
+  "version": "2.1.0",
+  "provider": {
+    "organization": "AGNT Protocol",
+    "url": "https://agnt.dev"
+  },
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "authentication": {
+    "schemes": ["none"],
+    "note": "All tools are currently free. MPP (Machine Payment Protocol) gating available for premium tiers."
+  },
+  "skills": [
+    {
+      "id": "defi_swap",
+      "name": "Token Swap",
+      "description": "Swap tokens across Tempo DEX, Uniswap V3, PancakeSwap, or via smart routing that auto-discovers the best pool.",
+      "tags": ["defi", "swap", "dex"],
+      "examples": ["Swap 100 USDC for ETH on Tempo", "Find and swap the best pool for PEPE"]
+    },
+    {
+      "id": "defi_bridge",
+      "name": "Cross-Chain Bridge",
+      "description": "Bridge tokens between chains via Stargate, Relay, deBridge, or Jumper/LiFi aggregator.",
+      "tags": ["defi", "bridge", "cross-chain"],
+      "examples": ["Bridge 500 USDC from Ethereum to Arbitrum", "Get a quote for bridging ETH to Base"]
+    },
+    {
+      "id": "defi_lend",
+      "name": "Lending & Borrowing",
+      "description": "Supply/withdraw assets on Aave V3 and Morpho optimized vaults across multiple chains.",
+      "tags": ["defi", "lending", "aave", "morpho"],
+      "examples": ["Supply 1000 USDC to Aave on Ethereum", "Check my Morpho positions"]
+    },
+    {
+      "id": "defi_perps",
+      "name": "Perpetual Trading",
+      "description": "Trade perpetual futures on Hyperliquid: place orders, set leverage, manage positions.",
+      "tags": ["defi", "perps", "trading", "hyperliquid"],
+      "examples": ["Open a 5x long on BTC with 1000 USDC", "Show my Hyperliquid positions"]
+    },
+    {
+      "id": "defi_yield",
+      "name": "Yield & Staking",
+      "description": "Liquid staking via Lido, restaking on EigenLayer, yield tokenization on Pendle, Ethena sUSDe, and Ondo USDY.",
+      "tags": ["defi", "yield", "staking"],
+      "examples": ["Stake 10 ETH with Lido", "Show Pendle markets sorted by APY"]
+    },
+    {
+      "id": "market_intel",
+      "name": "Market Intelligence",
+      "description": "Real-time prices, charts, funding rates, gas fees, whale tracking, token security, sentiment, and DEX pool discovery.",
+      "tags": ["data", "prices", "analytics"],
+      "examples": ["What's the price of ETH?", "Show whale activity for PEPE"]
+    },
+    {
+      "id": "automations",
+      "name": "Automated Strategies",
+      "description": "DCA strategies, price alerts, copy trading, backtesting, and composable multi-step strategies.",
+      "tags": ["automation", "dca", "strategy"],
+      "examples": ["Set up a DCA buying 50 USDC of ETH every day", "Alert me when BTC goes above 100k"]
+    },
+    {
+      "id": "prediction_markets",
+      "name": "Prediction Markets",
+      "description": "Browse, analyze, and trade on Polymarket prediction markets.",
+      "tags": ["prediction", "polymarket"],
+      "examples": ["Show trending Polymarket markets", "Buy $50 YES on market X"]
+    }
+  ],
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"]
+}
