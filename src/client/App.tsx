@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import LandingPage from './pages/LandingPage'
 import ToolkitPage from './pages/ToolkitPage'
 import DocsPage from './pages/DocsPage'
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/dashboard" element={<HackathonDisabledPage />} />
         <Route path="/docs" element={<DocsPage />} />
       </Routes>
+      <Analytics />
     </BrowserRouter>
   )
 }
