@@ -11,7 +11,7 @@
     "dev:client": "vite",
     "dev:server": "tsx watch src/server/index.ts",
     "build": "vite build",
-    "start": "node dist/server/index.js",
+    "start": "npm run mcp:serve",
     "mcp": "tsx src/mcp/server.ts",
     "mcp:serve": "tsx src/mcp/serve.ts"
   },
@@ -35,6 +35,7 @@
     "react-router-dom": "^7.5.0",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.4",
+    "tsx": "^4.21.0",
     "uuid": "^14.0.0",
     "viem": "^2.48.4"
   },
@@ -47,7 +48,6 @@
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vite": "^6.3.2"
   }
