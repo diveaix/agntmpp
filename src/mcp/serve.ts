@@ -116,6 +116,7 @@ function createMcpServer(auth?: AuthContext) {
 // ─── Express Server & Security ───────────────────────────
 
 const app = express()
+app.set('trust proxy', 1)
 app.use(cors({ origin: true, credentials: true }))
 
 // API Rate Limiting to prevent mass calling and abuse
