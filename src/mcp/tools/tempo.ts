@@ -81,6 +81,11 @@ const mkClient = (w: WalletEntry) => createWalletClient({ account: getAccount(w)
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
 
+function isEmptyReturnSimulation(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return /returned no data/i.test(msg) || /0x/i.test(msg) && /no data/i.test(msg)
+}
+
 function requireActiveWallet(): WalletEntry | { error: ReturnType<typeof err> } {
   const w = getActiveWallet()
   if (!w) {
@@ -424,7 +429,8 @@ async function handle(name: string, args: Record<string, unknown>) {
         const to = args.to as `0x${string}`
         const amount = args.amount as number
         const sym = (args.token as string) || 'USDC.e'
-        const memo = args.memo as string | undefined
+        const memoInput = typeof args.memo === 'string' ? args.memo.trim() : ''
+        const memo = memoInput.length > 0 ? memoInput : undefined
         const tok = resolveToken(sym)
         const requested = parseUnits(String(amount), tok.decimals)
         const balance = await pub().readContract({ address: tok.address, abi: tip20Abi, functionName: 'balanceOf', args: [w.address] }) as bigint
@@ -448,7 +454,9 @@ async function handle(name: string, args: Record<string, unknown>) {
             await pub().simulateContract({ address: tok.address, abi: tip20Abi, functionName: 'transfer', args: [to, parsed], account: getAccount(w) })
           }
         } catch (e) {
-          return err(`Transfer simulation failed before sending. No transaction was submitted. Reason: ${e instanceof Error ? e.message : String(e)}`)
+          if (!isEmptyReturnSimulation(e)) {
+            return err(`Transfer simulation failed before sending. No transaction was submitted. Reason: ${e instanceof Error ? e.message : String(e)}`)
+          }
         }
 
         const hash = memo
