@@ -10,6 +10,7 @@ import { getWalletClient as getChainsWalletClient, getPublicClient, explorerTxUr
 import { parseUnits, formatUnits, maxUint256, encodeFunctionData } from 'viem'
 import { buildTradeSafetyNotice } from './trade-safety.js'
 import { assessRouteUsdValues, assessRouteValue } from './route-safety.js'
+import { assertNativeBalanceCoversTx, isNativeToken, knownTokenDecimals, parseRouteAmount, resolveTokenAddress } from './aggregator-assets.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -22,7 +23,7 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<unknown> {
 
 function normalizeRelayCurrency(chain: string, currency: string | undefined, fallback: string): string {
   if (chain === 'hyperliquid') return HYPERLIQUID_RELAY_PERPS_USDC
-  return currency || fallback
+  return resolveTokenAddress(chain, currency || fallback)
 }
 
 // ─── Chain ID Map ────────────────────────────────────────
@@ -111,9 +112,10 @@ async function handle(name: string, args: Record<string, unknown>) {
     const w = getOrCreateWallet()
     const fromChain = (args.fromChain as string | undefined || '').toLowerCase()
     const toChain = (args.toChain as string | undefined || '').toLowerCase()
-    const tokenIn = args.tokenIn as string | undefined
+    const tokenIn = args.tokenIn ? resolveTokenAddress(fromChain, args.tokenIn as string, { lifiNative: true }) : undefined
     const tokenOut = (args.tokenOut as string | undefined) || (toChain === 'hyperliquid' ? HYPERLIQUID_PERPS_USDC : undefined)
-    const amount = args.amount as string | undefined
+    const resolvedTokenOut = tokenOut ? resolveTokenAddress(toChain, tokenOut, { lifiNative: true }) : undefined
+    const rawAmount = args.amount as string | undefined
     const slippage = ((args.slippage as number | undefined) ?? 1) / 100
     const maxLossPercent = Math.min((args.maxLossPercent as number | undefined) ?? 10, 10)
     const toAddress = (args.toAddress as string | undefined) || w.address
@@ -121,18 +123,20 @@ async function handle(name: string, args: Record<string, unknown>) {
     const toId = CHAIN_IDS[toChain]
 
     if (!fromId || !toId) return err(`Unknown chain. Available: ${Object.keys(CHAIN_IDS).join(', ')}`)
-    if (!tokenIn || !tokenOut || !amount) return err('Missing tokenIn, tokenOut, or amount.')
+    if (!tokenIn || !resolvedTokenOut || !rawAmount) return err('Missing tokenIn, tokenOut, or amount.')
     if (fromChain === 'hyperliquid') {
       return err('Use the Hyperliquid withdraw action for Hyperliquid USDC (Perps) withdrawals. It exits to Arbitrum USDC through Hyperliquid directly.')
     }
     if (!SUPPORTED_CHAINS[fromChain]) return err(`Execution from ${fromChain} is not wired in this server yet.`)
 
     try {
+      const inputDecimals = knownTokenDecimals(fromChain, tokenIn)
+      const amount = parseRouteAmount(rawAmount, inputDecimals).toString()
       const qs = new URLSearchParams({
         fromChain: String(fromId),
         toChain: String(toId),
         fromToken: tokenIn,
-        toToken: tokenOut,
+        toToken: resolvedTokenOut,
         fromAmount: amount,
         fromAddress: w.address,
         toAddress,
@@ -159,7 +163,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         transactionRequest?: { to: string; data: string; value?: string }
       }
 
-      const fromDecimals = quote.action?.fromToken?.decimals ?? 18
+      const fromDecimals = quote.action?.fromToken?.decimals ?? inputDecimals
       const toDecimals = quote.action?.toToken?.decimals ?? 6
       const inAmount = formatUnits(BigInt(quote.action?.fromAmount || amount), fromDecimals)
       const outAmount = quote.estimate?.toAmount ? formatUnits(BigInt(quote.estimate.toAmount), toDecimals) : '?'
@@ -207,12 +211,23 @@ async function handle(name: string, args: Record<string, unknown>) {
 
       const safetyNotice =
         (await buildTradeSafetyNotice(fromChain, [tokenIn])) +
-        (toChain === 'hyperliquid' ? '' : await buildTradeSafetyNotice(toChain, [tokenOut]))
+        (toChain === 'hyperliquid' ? '' : await buildTradeSafetyNotice(toChain, [resolvedTokenOut]))
 
-      const wc = getChainsWalletClient(fromChain, w)
       const pub = getPublicClient(fromChain)
+      const wc = getChainsWalletClient(fromChain, w)
+      const txTo = quote.transactionRequest.to as `0x${string}`
+      const txData = quote.transactionRequest.data as `0x${string}`
+      const txValue = BigInt(quote.transactionRequest.value || '0')
+      await assertNativeBalanceCoversTx({
+        client: pub,
+        account: w.address,
+        to: txTo,
+        data: txData,
+        value: txValue,
+        chain: fromChain,
+      })
 
-      if (tokenIn !== '0x0000000000000000000000000000000000000000' && quote.estimate?.approvalAddress) {
+      if (!isNativeToken(tokenIn) && quote.estimate?.approvalAddress) {
         const allowance = await pub.readContract({
           address: tokenIn as `0x${string}`,
           abi: erc20Abi,
@@ -235,9 +250,9 @@ async function handle(name: string, args: Record<string, unknown>) {
       const hash = await wc.sendTransaction({
         account: getAccount(w),
         chain: SUPPORTED_CHAINS[fromChain].chain,
-        to: quote.transactionRequest.to as `0x${string}`,
-        data: quote.transactionRequest.data as `0x${string}`,
-        value: BigInt(quote.transactionRequest.value || '0'),
+        to: txTo,
+        data: txData,
+        value: txValue,
       })
       const explorer = explorerTxUrl(fromChain, hash)
 
@@ -270,7 +285,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         const token = normalizeRelayCurrency(fromChain, args.token as string, ZERO_ADDRESS)
         const toToken = normalizeRelayCurrency(toChain, args.toToken as string | undefined, token)
         const rawAmount = args.amount as string
-        const decimals = (args.decimals as number) || (token === ZERO_ADDRESS ? 18 : 6)
+        const decimals = (args.decimals as number) || knownTokenDecimals(fromChain, token)
         const maxLossPercent = Math.min((args.maxLossPercent as number | undefined) ?? 10, 10)
         const amount = parseUnits(rawAmount, decimals).toString()
         const toAddress = (args.toAddress as string) || w.address
@@ -323,12 +338,21 @@ async function handle(name: string, args: Record<string, unknown>) {
           }
 
           const wc = getChainsWalletClient(fromChain, w)
+          const pub = getPublicClient(fromChain)
 
           // Execute each step (usually 1 approval + 1 bridge tx, or just 1 for native)
           let lastHash = ''
           for (const step of quoteData.steps) {
             for (const item of step.items) {
               const txData = item.data
+              await assertNativeBalanceCoversTx({
+                client: pub,
+                account: w.address,
+                to: txData.to as `0x${string}`,
+                data: (txData.data || '0x') as `0x${string}`,
+                value: BigInt(txData.value || '0'),
+                chain: fromChain,
+              })
               lastHash = await wc.sendTransaction({
                 account: getAccount(w),
                 chain: SUPPORTED_CHAINS[fromChain].chain,
@@ -339,7 +363,6 @@ async function handle(name: string, args: Record<string, unknown>) {
 
               // If there's a check endpoint, wait for confirmation before next step
               if (item.check?.endpoint) {
-                const pub = getPublicClient(fromChain)
                 await pub.waitForTransactionReceipt({ hash: lastHash as `0x${string}` })
               }
             }
@@ -374,7 +397,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         const token = normalizeRelayCurrency(fromChain, args.token as string, ZERO_ADDRESS)
         const toToken = normalizeRelayCurrency(toChain, args.toToken as string | undefined, token)
         const rawAmount = args.amount as string
-        const decimals = (args.decimals as number) || (token === ZERO_ADDRESS ? 18 : 6)
+        const decimals = (args.decimals as number) || knownTokenDecimals(fromChain, token)
         const maxLossPercent = Math.min((args.maxLossPercent as number | undefined) ?? 10, 10)
         const amount = parseUnits(rawAmount, decimals).toString()
 
@@ -498,6 +521,14 @@ async function handle(name: string, args: Record<string, unknown>) {
 
             if (allowance < BigInt(amount)) {
               const wc = getChainsWalletClient(fromChain, w)
+              await assertNativeBalanceCoversTx({
+                client: pub,
+                account: w.address,
+                to: tokenIn as `0x${string}`,
+                data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender, maxUint256] }),
+                value: 0n,
+                chain: fromChain,
+              })
               const approveHash = await wc.writeContract({
                 account: getAccount(w),
                 chain: SUPPORTED_CHAINS[fromChain].chain,
@@ -512,6 +543,14 @@ async function handle(name: string, args: Record<string, unknown>) {
 
           // Step 3: Submit the bridge transaction
           const wc = getChainsWalletClient(fromChain, w)
+          await assertNativeBalanceCoversTx({
+            client: getPublicClient(fromChain),
+            account: w.address,
+            to: txData.tx.to as `0x${string}`,
+            data: txData.tx.data as `0x${string}`,
+            value: BigInt(txData.tx.value || '0'),
+            chain: fromChain,
+          })
           const hash = await wc.sendTransaction({
             account: getAccount(w),
             chain: SUPPORTED_CHAINS[fromChain].chain,
