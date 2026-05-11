@@ -81,6 +81,18 @@ const mkClient = (w: WalletEntry) => createWalletClient({ account: getAccount(w)
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
 
+function requireActiveWallet(): WalletEntry | { error: ReturnType<typeof err> } {
+  const w = getActiveWallet()
+  if (!w) {
+    return {
+      error: err(
+        'No active AGNT wallet is selected on this server. Create or switch to a funded wallet with the wallet tool before executing transactions. Quotes can run without a wallet, but sends/swaps/bridges will not auto-create a new execution wallet.'
+      ),
+    }
+  }
+  return w
+}
+
 const TEMPO_STABLE_SEND_BUFFER = '0.005'
 
 function resolveToken(s: string) {
@@ -405,7 +417,9 @@ async function handle(name: string, args: Record<string, unknown>) {
     switch (args.action) {
       case 'send': {
         if (!args.to || args.amount === undefined) return err('Missing to or amount')
-        const w = getOrCreateWallet()
+        const active = requireActiveWallet()
+        if ('error' in active) return active.error
+        const w = active
         const client = mkClient(w)
         const to = args.to as `0x${string}`
         const amount = args.amount as number
@@ -470,7 +484,9 @@ async function handle(name: string, args: Record<string, unknown>) {
   if (name === 'tempo_swap') {
     switch (args.action) {
       case 'execute': {
-        const w = getOrCreateWallet()
+        const active = requireActiveWallet()
+        if ('error' in active) return active.error
+        const w = active
         const client = mkClient(w)
         const tIn = resolveToken(args.tokenIn as string)
         const tOut = resolveToken(args.tokenOut as string)
@@ -561,7 +577,9 @@ async function handle(name: string, args: Record<string, unknown>) {
 
     switch (args.action) {
       case 'execute': {
-        const w = getOrCreateWallet()
+        const active = requireActiveWallet()
+        if ('error' in active) return active.error
+        const w = active
         const client = mkClient(w)
         const sym = args.token as string
         const amount = args.amount as number
