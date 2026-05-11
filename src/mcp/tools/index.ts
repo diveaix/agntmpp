@@ -212,7 +212,15 @@ function isWriteAction(name: string, args: Record<string, unknown>): boolean {
 async function execTool(name: string, args: Record<string, unknown>, auth?: AuthContext): Promise<ToolResult> {
   // Check built-in modules first
   for (const mod of MODULES) {
-    const result = await mod.handle(name, args, auth)
+    let result: ToolResult | null
+    try {
+      result = await mod.handle(name, args, auth)
+    } catch (e) {
+      return {
+        content: [{ type: 'text', text: `❌ ${e instanceof Error ? e.message : String(e)}` }],
+        isError: true,
+      }
+    }
     if (result) {
       if (isWriteAction(name, args)) {
         try {

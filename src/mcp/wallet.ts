@@ -74,9 +74,17 @@ export function getActiveWallet(custom?: string): WalletEntry | null {
   return store.wallets[store.activeIndex] || null
 }
 
-/** Get or create active wallet. */
+/** Get the active wallet.
+ * Transaction tools must never create wallets implicitly, because that can
+ * route execution/gas through a fresh unfunded server wallet instead of the
+ * user's selected wallet. Wallet creation must be an explicit user action.
+ */
 export function getOrCreateWallet(name?: string, custom?: string): WalletEntry {
-  return getActiveWallet(custom) || createWallet(name, custom)
+  const wallet = getActiveWallet(custom)
+  if (!wallet) {
+    throw new Error('No active AGNT wallet is selected. Create or switch to a user wallet before executing transactions.')
+  }
+  return wallet
 }
 
 /** List all wallets. */
