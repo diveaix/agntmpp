@@ -1,7 +1,7 @@
 /**
- * ./AGNT Protocol — DEX & Aggregator Swap Tools
- * Uniswap V3 (multi-chain), PancakeSwap, Jumper/LiFi (cross-chain aggregator).
- * All swap actions execute real on-chain transactions via viem.
+ * ./AGNT Protocol - DEX helper tools.
+ * Normal user swaps use the hardened Jumper/LI.FI aggregator in bridges.ts.
+ * Direct DEX live swaps are disabled until quoter-backed min-out is implemented.
  */
 
 import type { ToolModule } from './index.js'
@@ -14,18 +14,6 @@ import { buildTradeSafetyNotice } from './trade-safety.js'
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
 
-async function fetchJson(url: string, opts?: RequestInit): Promise<unknown> {
-  const res = await fetch(url, opts)
-  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text().catch(() => '')}`)
-  return res.json()
-}
-
-// ─── Chain ID Map ────────────────────────────────────────
-
-const CHAIN_IDS: Record<string, number> = {
-  ethereum: 1, arbitrum: 42161, base: 8453, optimism: 10,
-  polygon: 137, avalanche: 43114, bsc: 56, gnosis: 100,
-}
 
 // ─── WETH per chain (DEX routers require ERC-20, not native ETH) ─────
 
@@ -113,7 +101,7 @@ const SWAP_ROUTER_02_CHAINS = new Set(['base'])
 const TOOLS = [
   {
     name: 'uniswap',
-    description: 'Uniswap V3 operations: swap, quote, browse pools, or add liquidity',
+    description: 'Uniswap V3 helper for quotes, pools, and LP previews. Live direct swaps are disabled; use jumper for safe routed swaps.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -138,7 +126,7 @@ const TOOLS = [
   },
   {
     name: 'pancakeswap',
-    description: 'PancakeSwap V3 operations',
+    description: 'PancakeSwap V3 helper for quotes. Live direct swaps are disabled; use jumper for safe routed swaps.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -150,23 +138,6 @@ const TOOLS = [
         slippage: { type: 'number' },
       },
       required: ['action', 'chain', 'tokenIn', 'tokenOut', 'amount'],
-    },
-  },
-  {
-    name: 'jumper',
-    description: 'Cross-chain swaps via Jumper/LiFi aggregator',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        action: { type: 'string', enum: ['swap', 'quote', 'routes'], description: 'Action to perform' },
-        fromChain: { type: 'string', description: 'Source chain' },
-        toChain: { type: 'string', description: 'Destination chain' },
-        tokenIn: { type: 'string', description: 'Input token address' },
-        tokenOut: { type: 'string', description: 'Output token address' },
-        amount: { type: 'string', description: 'Amount in smallest unit' },
-        slippage: { type: 'number', description: 'Slippage %. Default: 1 (for swap)' },
-      },
-      required: ['action', 'fromChain', 'toChain', 'tokenIn', 'tokenOut', 'amount'],
     },
   },
 ]
@@ -183,6 +154,8 @@ async function executeRouterSwap(
   feeTier: number,
   protocolName: string,
 ) {
+  throw new Error('Direct DEX execution is disabled until this tool has quoter-backed minimum received and gas-aware routing. Use jumper for safe swaps.')
+
   // Detect if user wants native ETH output (before resolving to WETH)
   const ethPlan = getNativeEthPlan(rawTokenIn, rawTokenOut, chain)
   const safetyNotice = await buildTradeSafetyNotice(chain, [rawTokenIn, rawTokenOut])
@@ -485,162 +458,6 @@ async function handle(name: string, args: Record<string, unknown>) {
     }
   }
 
-  if (name === 'jumper') {
-    switch (args.action) {
-      case 'swap': {
-        const w = getOrCreateWallet()
-        const fromChain = (args.fromChain as string).toLowerCase()
-        const toChain = (args.toChain as string).toLowerCase()
-        const tokenIn = args.tokenIn as string
-        const tokenOut = args.tokenOut as string
-        const amount = args.amount as string
-        const slippage = (args.slippage as number) || 1
-
-        const fromChainId = CHAIN_IDS[fromChain]
-        const toChainId = CHAIN_IDS[toChain]
-        if (!fromChainId || !toChainId) return err(`Unknown chain. Available: ${Object.keys(CHAIN_IDS).join(', ')}`)
-
-        try {
-          const safetyNotice =
-            (await buildTradeSafetyNotice(fromChain, [tokenIn])) +
-            (await buildTradeSafetyNotice(toChain, [tokenOut]))
-
-          // Fetch executable transaction from LiFi
-          const quoteUrl = `https://li.quest/v1/quote?fromChain=${fromChainId}&toChain=${toChainId}&fromToken=${tokenIn}&toToken=${tokenOut}&fromAmount=${amount}&fromAddress=${w.address}&slippage=${slippage / 100}`
-          const data = await fetchJson(quoteUrl) as {
-            transactionRequest?: { to: string; data: string; value: string; gasLimit: string }
-            estimate?: { toAmount: string; executionDuration: number; toAmountMin: string }
-            action?: { fromToken: { symbol: string; decimals: number }; toToken: { symbol: string; decimals: number } }
-            tool?: string
-          }
-
-          if (!data.transactionRequest) return err('LiFi returned no executable transaction. The route may not be available. Try action: quote to diagnose.')
-
-          const txReq = data.transactionRequest
-          const wc = getChainsWalletClient(fromChain, w)
-
-          // Handle ERC-20 approval if needed (LiFi includes approval data)
-          // The transactionRequest from LiFi handles approvals internally via their contracts
-
-          // Submit the transaction
-          const hash = await wc.sendTransaction({
-            account: getAccount(w),
-            chain: SUPPORTED_CHAINS[fromChain].chain,
-            to: txReq.to as `0x${string}`,
-            data: txReq.data as `0x${string}`,
-            value: BigInt(txReq.value || '0'),
-          })
-
-          const explorer = explorerTxUrl(fromChain, hash)
-          const estOut = data.estimate?.toAmount
-          const outDecimals = data.action?.toToken?.decimals || 18
-          const formattedOut = estOut ? formatUnits(BigInt(estOut), outDecimals) : '?'
-
-          return text(
-            safetyNotice +
-            `✅ Jumper/LiFi Swap Executed!\n\n` +
-            `Route: ${data.tool || 'Auto'}\n` +
-            `From: ${data.action?.fromToken?.symbol || tokenIn} on ${fromChain}\n` +
-            `To: ${data.action?.toToken?.symbol || tokenOut} on ${toChain}\n` +
-            `Expected Output: ~${formattedOut} ${data.action?.toToken?.symbol || tokenOut}\n` +
-            `Est. Time: ~${Math.ceil((data.estimate?.executionDuration || 60) / 60)} min\n\n` +
-            `Wallet: ${w.name} (${w.address})\n` +
-            `Tx: ${explorer}`
-          )
-        } catch (e) {
-          return err(`Jumper swap failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      case 'quote': {
-        const fromChain = (args.fromChain as string).toLowerCase()
-        const toChain = (args.toChain as string).toLowerCase()
-        const tokenIn = args.tokenIn as string
-        const tokenOut = args.tokenOut as string
-        const amount = args.amount as string
-
-        const fromChainId = CHAIN_IDS[fromChain]
-        const toChainId = CHAIN_IDS[toChain]
-        if (!fromChainId || !toChainId) return err(`Unknown chain.`)
-
-        try {
-          const url = `https://li.quest/v1/quote?fromChain=${fromChainId}&toChain=${toChainId}&fromToken=${tokenIn}&toToken=${tokenOut}&fromAmount=${amount}&fromAddress=0x0000000000000000000000000000000000000000`
-          const data = await fetchJson(url) as {
-            estimate?: { toAmount: string; executionDuration: number; gasCosts: { amountUSD: string }[] }
-            action?: { fromToken: { symbol: string; decimals: number }; toToken: { symbol: string; decimals: number } }
-            tool?: string
-          }
-
-          if (!data.estimate) return err('No route found for this swap.')
-
-          const toAmount = data.estimate.toAmount
-          const outDecimals = data.action?.toToken?.decimals || 18
-          const formattedOut = formatUnits(BigInt(toAmount), outDecimals)
-          const duration = data.estimate.executionDuration
-          const gasCost = data.estimate.gasCosts?.reduce((s, g) => s + parseFloat(g.amountUSD || '0'), 0) || 0
-
-          return text(
-            `📊 Jumper/LiFi Quote\n\n` +
-            `Route: ${data.tool || 'Auto'}\n` +
-            `${fromChain} → ${toChain}\n` +
-            `${data.action?.fromToken?.symbol || tokenIn} → ${data.action?.toToken?.symbol || tokenOut}\n\n` +
-            `Estimated Output: ~${formattedOut} ${data.action?.toToken?.symbol || tokenOut}\n` +
-            `Estimated Time: ~${Math.ceil(duration / 60)} minutes\n` +
-            `Gas Cost: ~$${gasCost.toFixed(2)}\n\n` +
-            `💡 Use action 'swap' to execute this route.`
-          )
-        } catch (e) {
-          return err(`LiFi quote failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      case 'routes': {
-        const fromChain = (args.fromChain as string).toLowerCase()
-        const toChain = (args.toChain as string).toLowerCase()
-        const tokenIn = args.tokenIn as string
-        const tokenOut = args.tokenOut as string
-        const amount = args.amount as string
-
-        const fromChainId = CHAIN_IDS[fromChain]
-        const toChainId = CHAIN_IDS[toChain]
-        if (!fromChainId || !toChainId) return err(`Unknown chain.`)
-
-        try {
-          const url = `https://li.quest/v1/advanced/routes`
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fromChainId, toChainId,
-              fromTokenAddress: tokenIn, toTokenAddress: tokenOut,
-              fromAmount: amount,
-              options: { slippage: 0.01 },
-            }),
-          })
-          if (!res.ok) throw new Error(`API error: ${res.status}`)
-          const data = await res.json() as { routes: { steps: { tool: string; type: string }[]; toAmount: string; gasCostUSD: string }[] }
-
-          const routes = data.routes || []
-          if (!routes.length) return text(`No routes found for ${fromChain} → ${toChain}.`)
-
-          const lines: string[] = [`🛤️ Available Routes — ${fromChain} → ${toChain}\n`]
-          lines.push(`${'#'.padEnd(4)} ${'Route'.padEnd(30)} ${'Output'.padEnd(18)} Gas`)
-          lines.push('─'.repeat(60))
-
-          for (let i = 0; i < Math.min(routes.length, 5); i++) {
-            const r = routes[i]
-            const tools = r.steps.map(s => s.tool).join(' → ')
-            lines.push(`${(i + 1).toString().padEnd(4)} ${tools.slice(0, 29).padEnd(30)} ${r.toAmount.slice(0, 17).padEnd(18)} $${parseFloat(r.gasCostUSD || '0').toFixed(2)}`)
-          }
-
-          lines.push(`\nTotal routes found: ${routes.length}`)
-          lines.push(`Source: LiFi API`)
-          return text(lines.join('\n'))
-        } catch (e) {
-          return err(`Route search failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      default: return err(`Unknown jumper action: ${args.action}`)
-    }
-  }
 
   return null
 }
