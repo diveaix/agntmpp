@@ -79,14 +79,15 @@ import { HACKATHON_DISABLED_MESSAGE, HACKATHON_MODE } from '../hackathon-mode.js
 
 // ─── Create MCP Server instance ──────────────────────────
 
-function createMcpServer(auth?: AuthContext) {
+function createMcpServer(auth?: AuthContext, walletScope?: string | (() => string | undefined)) {
   const server = new Server({ name: 'agnt-protocol', version: '2.1.0' }, { capabilities: { tools: {}, resources: {} } })
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: ALL_TOOLS }))
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const meta = (req.params as Record<string, unknown>)?._meta as Record<string, unknown> | undefined
-      return await handleTool(req.params.name, (req.params.arguments || {}) as Record<string, unknown>, meta, auth)
+      const resolvedWalletScope = typeof walletScope === 'function' ? walletScope() : walletScope
+      return await handleTool(req.params.name, (req.params.arguments || {}) as Record<string, unknown>, meta, auth, resolvedWalletScope)
     }
     catch (e) { return { content: [{ type: 'text' as const, text: `❌ ${e instanceof Error ? e.message : String(e)}` }], isError: true } }
   })
@@ -274,7 +275,13 @@ app.post('/token', express.json(), express.urlencoded({ extended: true }), (req,
 // When AGNT_PASSPHRASE is not set, auth is skipped (open dev mode).
 // Set AGNT_PASSPHRASE in .env to enforce JWT protection in production.
 const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (HACKATHON_MODE) return next()
+  if (HACKATHON_MODE) {
+    const accessAuth = resolveAuthContextFromRequest(req.headers, req.originalUrl || req.url)
+    if (accessAuth) {
+      ;(req as AuthedRequest).agntAuth = accessAuth
+    }
+    return next()
+  }
 
   const accessAuth = resolveAuthContextFromRequest(req.headers, req.originalUrl || req.url)
   if (accessAuth) {
@@ -318,11 +325,13 @@ app.all('/mcp', requireAuth, async (req, res) => {
   // New initialization request (POST without session ID)
   if (req.method === 'POST' && !sessionId) {
     const auth = getAuthForRequest(req)
-    const server = createMcpServer(auth)
+    let walletScope = auth ? `user:${auth.userId}` : undefined as string | undefined
+    const server = createMcpServer(auth, () => walletScope)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (sid: string) => {
         console.log(`[Streamable] Session registered: ${sid}`)
+        walletScope = auth ? `user:${auth.userId}` : `mcp-session:${sid}`
         streamableSessions.set(sid, { transport, server, auth })
       },
     })
@@ -342,6 +351,7 @@ app.all('/mcp', requireAuth, async (req, res) => {
     const sid = transport.sessionId
     if (sid && !streamableSessions.has(sid)) {
       console.log(`[Streamable] Session registered (fallback): ${sid}`)
+      walletScope = auth ? `user:${auth.userId}` : `mcp-session:${sid}`
       streamableSessions.set(sid, { transport, server, auth })
     }
     return
@@ -359,7 +369,8 @@ app.get('/sse', requireAuth, async (req, res) => {
   console.log(`[SSE] New connection from ${req.ip}`)
   const transport = new SSEServerTransport('/messages', res)
   const auth = getAuthForRequest(req)
-  const server = createMcpServer(auth)
+  const walletScope = auth ? `user:${auth.userId}` : `mcp-session:${transport.sessionId}`
+  const server = createMcpServer(auth, walletScope)
   sseSessions.set(transport.sessionId, { transport, auth })
 
   res.on('close', () => {

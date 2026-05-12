@@ -6,7 +6,9 @@
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, resolve, isAbsolute } from 'path'
+import { createHash } from 'crypto'
 import { encrypt, decrypt, getPassphrase } from './crypto.js'
+import { getCurrentWalletScope } from './tool-context.js'
 
 export interface WalletEntry {
   name: string
@@ -21,6 +23,16 @@ export interface WalletStore {
 }
 
 function resolvePath(custom?: string): string {
+  if (!custom) {
+    const scope = getCurrentWalletScope()
+    if (scope) {
+      const safeScope = createHash('sha256').update(scope, 'utf8').digest('hex').slice(0, 32)
+      const baseDir = process.env.AGNT_WALLET_DIR
+        ? (isAbsolute(process.env.AGNT_WALLET_DIR) ? process.env.AGNT_WALLET_DIR : resolve(process.cwd(), process.env.AGNT_WALLET_DIR))
+        : resolve(dirname(resolvePath(process.env.AGNT_WALLET_PATH)), 'wallets')
+      return resolve(baseDir, `${safeScope}.enc`)
+    }
+  }
   const p = custom || process.env.AGNT_WALLET_PATH || '.agnt/wallets.enc'
   return isAbsolute(p) ? p : resolve(process.cwd(), p)
 }

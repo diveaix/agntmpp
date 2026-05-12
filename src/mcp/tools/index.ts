@@ -23,6 +23,7 @@ export interface ToolResult {
 }
 
 import type { AuthContext } from '../access-types.js'
+import { runWithToolContext } from '../tool-context.js'
 
 export interface ToolModule {
   tools: ToolDef[]
@@ -109,7 +110,9 @@ export async function handleTool(
   args: Record<string, unknown>,
   meta?: Record<string, unknown>,
   auth?: AuthContext,
+  walletScope?: string,
 ): Promise<ToolResult> {
+  return runWithToolContext({ auth, walletScope: walletScope || (auth ? `user:${auth.userId}` : undefined) }, async () => {
   recordCall()
 
   // Hackathon submission mode: keep every tool callable without MPP/API-key gates.
@@ -178,6 +181,7 @@ export async function handleTool(
     },
   }
   return result
+  })
 }
 
 // ─── Write tools that trigger auto-memory + Telegram ────
