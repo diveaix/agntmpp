@@ -331,6 +331,28 @@ function parsePlan(value: unknown): AccessPlan {
   return 'free'
 }
 
+function parseJudgePlan(value: unknown): AccessPlan {
+  if (value === 'free' || value === 'pro' || value === 'max') return value
+  return 'max'
+}
+
+function resolveJudgeAuthContextFromApiKey(apiKey: string): AuthContext | null {
+  const configured = process.env.AGNT_JUDGE_API_KEY?.trim()
+  if (!configured) return null
+  const providedHash = hashApiKey(apiKey.trim())
+  const configuredHash = hashApiKey(configured)
+  if (!secureEqual(providedHash, configuredHash)) return null
+  const plan = parseJudgePlan(process.env.AGNT_JUDGE_PLAN)
+  return {
+    userId: process.env.AGNT_JUDGE_USER_ID?.trim() || 'judge-demo',
+    apiKeyId: process.env.AGNT_JUDGE_API_KEY_ID?.trim() || 'judge-demo-env',
+    plan,
+    subscriptionStatus: 'active',
+    entitlement: getAccessEntitlement(plan),
+    source: 'api_key',
+  }
+}
+
 export function createEmailVerificationCode(input: { email: string; codeHash: string; expiresAt: string }, custom?: string): EmailVerificationCode {
   const store = loadAccessStore(custom)
   const timestamp = nowIso()
@@ -515,6 +537,8 @@ export function resolveAuthContextForUser(userId: string, apiKeyId = 'manual', c
 
 export function resolveAuthContextFromApiKey(apiKey: string | undefined, custom?: string): AuthContext | null {
   if (!apiKey) return null
+  const judgeAuth = resolveJudgeAuthContextFromApiKey(apiKey)
+  if (judgeAuth) return judgeAuth
   const key = findApiKeyByPlaintext(apiKey, custom)
   if (!key) return null
   return resolveAuthContextForUser(key.userId, key.id, custom)

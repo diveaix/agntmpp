@@ -18,6 +18,25 @@ async function withAccessPath<T>(fn: () => Promise<T> | T): Promise<T> {
   }
 }
 
+async function withJudgeKeyEnv<T>(fn: () => Promise<T> | T): Promise<T> {
+  const previousKey = process.env.AGNT_JUDGE_API_KEY
+  const previousUserId = process.env.AGNT_JUDGE_USER_ID
+  const previousPlan = process.env.AGNT_JUDGE_PLAN
+  process.env.AGNT_JUDGE_API_KEY = 'agnt_judge_test_secret'
+  process.env.AGNT_JUDGE_USER_ID = 'judge-hackathon'
+  process.env.AGNT_JUDGE_PLAN = 'max'
+  try {
+    return await fn()
+  } finally {
+    if (previousKey === undefined) delete process.env.AGNT_JUDGE_API_KEY
+    else process.env.AGNT_JUDGE_API_KEY = previousKey
+    if (previousUserId === undefined) delete process.env.AGNT_JUDGE_USER_ID
+    else process.env.AGNT_JUDGE_USER_ID = previousUserId
+    if (previousPlan === undefined) delete process.env.AGNT_JUDGE_PLAN
+    else process.env.AGNT_JUDGE_PLAN = previousPlan
+  }
+}
+
 test('extracts api key from Claude-friendly MCP URL query param', () => {
   assert.equal(
     extractApiKeyFromUrl('/mcp?agnt_api_key=agnt_live_claude_key'),
@@ -34,6 +53,21 @@ test('request auth accepts URL api key when headers are unavailable', async () =
     const auth = resolveAuthContextFromRequest({}, '/mcp?agnt_api_key=agnt_live_claude_secret')
     assert.equal(auth?.userId, user.id)
     assert.equal(auth?.source, 'api_key')
+  })
+})
+
+test('request auth accepts env-provided judge key without an access-store record', async () => {
+  await withAccessPath(async () => {
+    await withJudgeKeyEnv(() => {
+      const headerAuth = resolveAuthContextFromRequest({ 'x-agnt-api-key': 'agnt_judge_test_secret' }, '/mcp')
+      assert.equal(headerAuth?.userId, 'judge-hackathon')
+      assert.equal(headerAuth?.apiKeyId, 'judge-demo-env')
+      assert.equal(headerAuth?.plan, 'max')
+      assert.equal(headerAuth?.source, 'api_key')
+
+      const urlAuth = resolveAuthContextFromRequest({}, '/sse?agnt_api_key=agnt_judge_test_secret')
+      assert.equal(urlAuth?.userId, 'judge-hackathon')
+    })
   })
 })
 
