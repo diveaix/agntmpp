@@ -4,7 +4,7 @@
  * Extracted from the original monolithic server.ts into a modular venue module.
  */
 
-import { formatUnits, parseUnits, pad, stringToHex, createWalletClient, http, maxUint256 } from 'viem'
+import { formatUnits, parseUnits, pad, stringToHex, createWalletClient, http } from 'viem'
 import { tempo } from 'viem/chains'
 import { TEMPO_CHAIN, TOKENS, CONTRACTS, STARGATE, CHAIN_EIDS, DEFAULT_SLIPPAGE, DEX_FEE_BPS } from '../config.js'
 import { tip20Abi, dexAbi, stargateAbi, ammRouterAbi } from '../abis.js'
@@ -520,10 +520,15 @@ async function handle(name: string, args: Record<string, unknown>) {
         const expectedOut = amountsOut[amountsOut.length - 1]
         const minOut = expectedOut * BigInt(Math.floor((1 - slip) * 10000)) / 10000n
 
-        // Approve router to spend input tokens
+        // Approve only this swap amount. If an older broader approval exists,
+        // replace it so the spender cannot keep unused allowance.
         const allowance = await pub().readContract({ address: tIn.address, abi: tip20Abi, functionName: 'allowance', args: [w.address, CONTRACTS.ammRouter] }) as bigint
-        if (allowance < parsed) {
-          const approveTx = await client.writeContract({ address: tIn.address, abi: tip20Abi, functionName: 'approve', args: [CONTRACTS.ammRouter, maxUint256] })
+        if (allowance !== parsed) {
+          if (allowance > 0n) {
+            const resetTx = await client.writeContract({ address: tIn.address, abi: tip20Abi, functionName: 'approve', args: [CONTRACTS.ammRouter, 0n] })
+            await pub().waitForTransactionReceipt({ hash: resetTx })
+          }
+          const approveTx = await client.writeContract({ address: tIn.address, abi: tip20Abi, functionName: 'approve', args: [CONTRACTS.ammRouter, parsed] })
           await pub().waitForTransactionReceipt({ hash: approveTx })
         }
 
@@ -619,11 +624,16 @@ async function handle(name: string, args: Record<string, unknown>) {
 
           const txReq = data.transactionRequest
 
-          // Approve LiFi contract if needed for ERC-20
+          // Approve only this bridge amount. If an older broader approval exists,
+          // replace it so the spender cannot keep unused allowance.
           const spender = txReq.to as `0x${string}`
           const allowance = await pub().readContract({ address: tok.address, abi: tip20Abi, functionName: 'allowance', args: [w.address, spender] }) as bigint
-          if (allowance < parsed) {
-            const approveTx = await client.writeContract({ address: tok.address, abi: tip20Abi, functionName: 'approve', args: [spender, maxUint256] })
+          if (allowance !== parsed) {
+            if (allowance > 0n) {
+              const resetTx = await client.writeContract({ address: tok.address, abi: tip20Abi, functionName: 'approve', args: [spender, 0n] })
+              await pub().waitForTransactionReceipt({ hash: resetTx })
+            }
+            const approveTx = await client.writeContract({ address: tok.address, abi: tip20Abi, functionName: 'approve', args: [spender, parsed] })
             await pub().waitForTransactionReceipt({ hash: approveTx })
           }
 

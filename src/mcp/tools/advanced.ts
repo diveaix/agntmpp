@@ -8,8 +8,8 @@ import type { ToolModule } from './index.js'
 import { getActiveWallet, getOrCreateWallet, getAccount } from '../wallet.js'
 import { createAutomation, formatInterval, parseInterval } from '../scheduler.js'
 import { getWalletClient as getChainsWalletClient, getPublicClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
-import { callContract, formatTxResult } from '../tx-executor.js'
-import { formatUnits, parseUnits } from 'viem'
+import { callContract, ERC20_ABI, formatTxResult } from '../tx-executor.js'
+import { encodeFunctionData, formatUnits, parseUnits } from 'viem'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -76,7 +76,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           const quoteUrl = `https://li.quest/v1/quote?fromChain=${chainId}&toChain=${chainId}&fromToken=${tokenIn}&toToken=${tokenOut}&fromAmount=${amount}&fromAddress=${w.address}&slippage=${slippage / 100}`
           const data = await fetchJson(quoteUrl) as {
             transactionRequest?: { to: string; data: string; value: string }
-            estimate?: { toAmount: string; executionDuration: number }
+            estimate?: { toAmount: string; executionDuration: number; approvalAddress?: string }
             action?: { fromToken: { symbol: string; decimals: number }; toToken: { symbol: string; decimals: number } }
             tool?: string
           }
@@ -84,6 +84,38 @@ async function handle(name: string, args: Record<string, unknown>) {
           if (!data.transactionRequest) return err('No executable route found. Try different tokens or amount.')
 
           const wc = getChainsWalletClient(chain, w)
+          const pub = getPublicClient(chain)
+          if (tokenIn.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' && data.estimate?.approvalAddress) {
+            const token = tokenIn as `0x${string}`
+            const spender = data.estimate.approvalAddress as `0x${string}`
+            const amountIn = BigInt(amount)
+            const allowance = await pub.readContract({
+              address: token,
+              abi: ERC20_ABI,
+              functionName: 'allowance',
+              args: [w.address, spender],
+            }) as bigint
+            if (allowance !== amountIn) {
+              if (allowance > 0n) {
+                const resetHash = await wc.sendTransaction({
+                  account: getAccount(w),
+                  chain: SUPPORTED_CHAINS[chain].chain,
+                  to: token,
+                  data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [spender, 0n] }),
+                  value: 0n,
+                })
+                await pub.waitForTransactionReceipt({ hash: resetHash })
+              }
+              const approvalHash = await wc.sendTransaction({
+                account: getAccount(w),
+                chain: SUPPORTED_CHAINS[chain].chain,
+                to: token,
+                data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [spender, amountIn] }),
+                value: 0n,
+              })
+              await pub.waitForTransactionReceipt({ hash: approvalHash })
+            }
+          }
           const hash = await wc.sendTransaction({
             account: getAccount(w),
             chain: SUPPORTED_CHAINS[chain].chain,

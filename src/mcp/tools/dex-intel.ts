@@ -7,7 +7,7 @@
 import type { ToolModule } from './index.js'
 import { getOrCreateWallet, getAccount } from '../wallet.js'
 import { getPublicClient, getWalletClient as getChainsWalletClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
-import { parseUnits, formatUnits, maxUint256 } from 'viem'
+import { parseUnits, formatUnits } from 'viem'
 import {
   getNativeEthPlan,
   isNativeEthRequest as isExplicitNativeEthRequest,
@@ -569,13 +569,22 @@ async function handle(name: string, args: Record<string, unknown>) {
             ? await pub.readContract({ address: tokenOut, abi: erc20Abi, functionName: 'balanceOf', args: [w.address] }) as bigint
             : 0n
 
-          // Approve router
+          // Approve only this swap amount. If an older broader approval exists,
+          // replace it so the router cannot keep unused allowance.
           const allowance = await pub.readContract({ address: tokenIn, abi: erc20Abi, functionName: 'allowance', args: [w.address, routerInfo.router.address] }) as bigint
-          if (allowance < amountIn) {
+          if (allowance !== amountIn) {
+            if (allowance > 0n) {
+              const resetTx = await wc.writeContract({
+                account, chain: chainConfig.chain,
+                address: tokenIn, abi: erc20Abi, functionName: 'approve',
+                args: [routerInfo.router.address, 0n],
+              })
+              await pub.waitForTransactionReceipt({ hash: resetTx })
+            }
             const approveTx = await wc.writeContract({
               account, chain: chainConfig.chain,
               address: tokenIn, abi: erc20Abi, functionName: 'approve',
-              args: [routerInfo.router.address, maxUint256],
+              args: [routerInfo.router.address, amountIn],
             })
             await pub.waitForTransactionReceipt({ hash: approveTx })
           }

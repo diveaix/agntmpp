@@ -124,10 +124,13 @@ export async function ensureApproval(
     address: token, abi: ERC20_ABI, functionName: 'allowance', args: [w.address, spender],
   }) as bigint
 
-  if (allowance >= amount) return null // already approved
+  if (allowance === amount) return null // already approved for exactly this call
 
-  const maxApproval = 2n ** 256n - 1n
-  const tx = await callContract(chain, token, ERC20_ABI, 'approve', [spender, maxApproval])
+  if (allowance > 0n) {
+    await callContract(chain, token, ERC20_ABI, 'approve', [spender, 0n])
+  }
+
+  const tx = await callContract(chain, token, ERC20_ABI, 'approve', [spender, amount])
   return tx.hash
 }
 

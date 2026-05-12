@@ -7,7 +7,7 @@
 import type { ToolModule } from './index.js'
 import { getOrCreateWallet, getAccount } from '../wallet.js'
 import { getWalletClient as getChainsWalletClient, getPublicClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
-import { parseUnits, formatUnits, maxUint256, encodeFunctionData } from 'viem'
+import { decodeFunctionData, encodeFunctionData, formatUnits, parseUnits } from 'viem'
 import { buildTradeSafetyNotice } from './trade-safety.js'
 import { assessRouteUsdValues, assessRouteValue } from './route-safety.js'
 import { assertNativeBalanceCoversTx, isNativeToken, knownTokenDecimals, parseRouteAmount, resolveTokenAddress } from './aggregator-assets.js'
@@ -43,6 +43,65 @@ const erc20Abi = [
   { name: 'approve', type: 'function', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }], stateMutability: 'nonpayable' },
   { name: 'allowance', type: 'function', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view' },
 ] as const
+
+async function approveExactIfNeeded(input: {
+  chain: string
+  token: `0x${string}`
+  owner: `0x${string}`
+  spender: `0x${string}`
+  amount: bigint
+  pub: ReturnType<typeof getPublicClient>
+  wc: ReturnType<typeof getChainsWalletClient>
+  wallet: ReturnType<typeof getAccount>
+}) {
+  const current = await input.pub.readContract({
+    address: input.token,
+    abi: erc20Abi,
+    functionName: 'allowance',
+    args: [input.owner, input.spender],
+  }) as bigint
+
+  if (current === input.amount) return []
+
+  const hashes: `0x${string}`[] = []
+  if (current > 0n) {
+    const resetData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [input.spender, 0n] })
+    await assertNativeBalanceCoversTx({ client: input.pub, account: input.owner, to: input.token, data: resetData, value: 0n, chain: input.chain })
+    const resetHash = await input.wc.sendTransaction({
+      account: input.wallet,
+      chain: SUPPORTED_CHAINS[input.chain].chain,
+      to: input.token,
+      data: resetData,
+      value: 0n,
+    })
+    await input.pub.waitForTransactionReceipt({ hash: resetHash as `0x${string}` })
+    hashes.push(resetHash as `0x${string}`)
+  }
+
+  const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [input.spender, input.amount] })
+  await assertNativeBalanceCoversTx({ client: input.pub, account: input.owner, to: input.token, data: approveData, value: 0n, chain: input.chain })
+  const approveHash = await input.wc.sendTransaction({
+    account: input.wallet,
+    chain: SUPPORTED_CHAINS[input.chain].chain,
+    to: input.token,
+    data: approveData,
+    value: 0n,
+  })
+  await input.pub.waitForTransactionReceipt({ hash: approveHash as `0x${string}` })
+  hashes.push(approveHash as `0x${string}`)
+  return hashes
+}
+
+function decodeApproval(data: string): { spender: `0x${string}`; amount: bigint } | null {
+  try {
+    const decoded = decodeFunctionData({ abi: erc20Abi, data: data as `0x${string}` })
+    if (decoded.functionName !== 'approve') return null
+    const [spender, amount] = decoded.args
+    return { spender, amount }
+  } catch {
+    return null
+  }
+}
 
 // ─── Tool Definitions ────────────────────────────────────
 
@@ -228,23 +287,16 @@ async function handle(name: string, args: Record<string, unknown>) {
       })
 
       if (!isNativeToken(tokenIn) && quote.estimate?.approvalAddress) {
-        const allowance = await pub.readContract({
-          address: tokenIn as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [w.address as `0x${string}`, quote.estimate.approvalAddress as `0x${string}`],
-        }) as bigint
-
-        if (allowance < BigInt(amount)) {
-          const approvalHash = await wc.sendTransaction({
-            account: getAccount(w),
-            chain: SUPPORTED_CHAINS[fromChain].chain,
-            to: tokenIn as `0x${string}`,
-            data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [quote.estimate.approvalAddress as `0x${string}`, maxUint256] }),
-            value: BigInt(0),
-          })
-          await pub.waitForTransactionReceipt({ hash: approvalHash as `0x${string}` })
-        }
+        await approveExactIfNeeded({
+          chain: fromChain,
+          token: tokenIn as `0x${string}`,
+          owner: w.address as `0x${string}`,
+          spender: quote.estimate.approvalAddress as `0x${string}`,
+          amount: BigInt(amount),
+          pub,
+          wc,
+          wallet: getAccount(w),
+        })
       }
 
       const hash = await wc.sendTransaction({
@@ -345,6 +397,22 @@ async function handle(name: string, args: Record<string, unknown>) {
           for (const step of quoteData.steps) {
             for (const item of step.items) {
               const txData = item.data
+              const relayApproval = !isNativeToken(token) && txData.to?.toLowerCase() === token.toLowerCase()
+                ? decodeApproval(txData.data || '0x')
+                : null
+              if (relayApproval) {
+                await approveExactIfNeeded({
+                  chain: fromChain,
+                  token: token as `0x${string}`,
+                  owner: w.address as `0x${string}`,
+                  spender: relayApproval.spender,
+                  amount: BigInt(amount),
+                  pub,
+                  wc,
+                  wallet: getAccount(w),
+                })
+                continue
+              }
               await assertNativeBalanceCoversTx({
                 client: pub,
                 account: w.address,
@@ -512,33 +580,17 @@ async function handle(name: string, args: Record<string, unknown>) {
           if (!isNativeToken) {
             const pub = getPublicClient(fromChain)
             const spender = txData.tx.to as `0x${string}`
-            const allowance = await pub.readContract({
-              address: tokenIn as `0x${string}`,
-              abi: erc20Abi,
-              functionName: 'allowance',
-              args: [w.address, spender],
-            }) as bigint
-
-            if (allowance < BigInt(amount)) {
-              const wc = getChainsWalletClient(fromChain, w)
-              await assertNativeBalanceCoversTx({
-                client: pub,
-                account: w.address,
-                to: tokenIn as `0x${string}`,
-                data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender, maxUint256] }),
-                value: 0n,
-                chain: fromChain,
-              })
-              const approveHash = await wc.writeContract({
-                account: getAccount(w),
-                chain: SUPPORTED_CHAINS[fromChain].chain,
-                address: tokenIn as `0x${string}`,
-                abi: erc20Abi,
-                functionName: 'approve',
-                args: [spender, maxUint256],
-              })
-              await pub.waitForTransactionReceipt({ hash: approveHash })
-            }
+            const wc = getChainsWalletClient(fromChain, w)
+            await approveExactIfNeeded({
+              chain: fromChain,
+              token: tokenIn as `0x${string}`,
+              owner: w.address as `0x${string}`,
+              spender,
+              amount: BigInt(amount),
+              pub,
+              wc,
+              wallet: getAccount(w),
+            })
           }
 
           // Step 3: Submit the bridge transaction
