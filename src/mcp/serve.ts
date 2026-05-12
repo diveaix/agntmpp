@@ -137,6 +137,29 @@ function getAuthForRequest(req: express.Request): AuthContext | undefined {
   return (req as AuthedRequest).agntAuth
 }
 
+function getHeaderString(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function resolvePersistentWalletScope(req: express.Request, auth?: AuthContext): string {
+  if (auth) return `user:${auth.userId}`
+
+  const explicitClientId =
+    getHeaderString(req.headers['x-agnt-client-id']) ||
+    getHeaderString(req.headers['x-client-id']) ||
+    (typeof req.query.clientId === 'string' ? req.query.clientId : undefined)
+
+  if (explicitClientId?.trim()) {
+    return `client:${explicitClientId.trim()}`
+  }
+
+  const forwardedFor = getHeaderString(req.headers['x-forwarded-for']) || req.ip || req.socket.remoteAddress || 'unknown-ip'
+  const userAgent = getHeaderString(req.headers['user-agent']) || 'unknown-agent'
+  const host = getHeaderString(req.headers.host) || 'unknown-host'
+  const fingerprint = crypto.createHash('sha256').update(`${host}|${forwardedFor}|${userAgent}`).digest('hex').slice(0, 32)
+  return `anonymous:${fingerprint}`
+}
+
 function parseCookies(req: express.Request): Record<string, string> {
   const header = req.headers.cookie
   if (!header) return {}
@@ -308,7 +331,7 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
 
 // ─── Streamable HTTP Transport (modern — used by Antigravity, etc.) ───
 
-const streamableSessions = new Map<string, { transport: StreamableHTTPServerTransport; server: Server; auth?: AuthContext }>()
+const streamableSessions = new Map<string, { transport: StreamableHTTPServerTransport; server: Server; auth?: AuthContext; walletScope: string }>()
 
 // Handle POST, GET, DELETE on /mcp for Streamable HTTP
 app.all('/mcp', requireAuth, async (req, res) => {
@@ -325,14 +348,13 @@ app.all('/mcp', requireAuth, async (req, res) => {
   // New initialization request (POST without session ID)
   if (req.method === 'POST' && !sessionId) {
     const auth = getAuthForRequest(req)
-    let walletScope = auth ? `user:${auth.userId}` : undefined as string | undefined
-    const server = createMcpServer(auth, () => walletScope)
+    const walletScope = resolvePersistentWalletScope(req, auth)
+    const server = createMcpServer(auth, walletScope)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (sid: string) => {
         console.log(`[Streamable] Session registered: ${sid}`)
-        walletScope = auth ? `user:${auth.userId}` : `mcp-session:${sid}`
-        streamableSessions.set(sid, { transport, server, auth })
+        streamableSessions.set(sid, { transport, server, auth, walletScope })
       },
     })
 
@@ -351,8 +373,7 @@ app.all('/mcp', requireAuth, async (req, res) => {
     const sid = transport.sessionId
     if (sid && !streamableSessions.has(sid)) {
       console.log(`[Streamable] Session registered (fallback): ${sid}`)
-      walletScope = auth ? `user:${auth.userId}` : `mcp-session:${sid}`
-      streamableSessions.set(sid, { transport, server, auth })
+      streamableSessions.set(sid, { transport, server, auth, walletScope })
     }
     return
   }
@@ -363,15 +384,15 @@ app.all('/mcp', requireAuth, async (req, res) => {
 
 // ─── Legacy SSE Transport (backward compat — Cursor, Claude Desktop, etc.) ───
 
-const sseSessions = new Map<string, { transport: SSEServerTransport; auth?: AuthContext }>()
+const sseSessions = new Map<string, { transport: SSEServerTransport; auth?: AuthContext; walletScope: string }>()
 
 app.get('/sse', requireAuth, async (req, res) => {
   console.log(`[SSE] New connection from ${req.ip}`)
   const transport = new SSEServerTransport('/messages', res)
   const auth = getAuthForRequest(req)
-  const walletScope = auth ? `user:${auth.userId}` : `mcp-session:${transport.sessionId}`
+  const walletScope = resolvePersistentWalletScope(req, auth)
   const server = createMcpServer(auth, walletScope)
-  sseSessions.set(transport.sessionId, { transport, auth })
+  sseSessions.set(transport.sessionId, { transport, auth, walletScope })
 
   res.on('close', () => {
     console.log(`[SSE] Connection closed: ${transport.sessionId}`)
