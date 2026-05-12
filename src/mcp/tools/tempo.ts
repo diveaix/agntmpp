@@ -8,7 +8,7 @@ import { formatUnits, parseUnits, pad, stringToHex, createWalletClient, http } f
 import { tempo } from 'viem/chains'
 import { TEMPO_CHAIN, TOKENS, CONTRACTS, STARGATE, CHAIN_EIDS, DEFAULT_SLIPPAGE, DEX_FEE_BPS } from '../config.js'
 import { tip20Abi, dexAbi, stargateAbi, ammRouterAbi } from '../abis.js'
-import { createWallet, getActiveWallet, getOrCreateWallet, listWallets, switchWallet, renameWallet, deleteWallet, getAccount, type WalletEntry } from '../wallet.js'
+import { createWallet, getActiveWallet, getOrCreateWallet, listWallets, switchWallet, renameWallet, deleteWallet, recoverLegacyWallet, getAccount, type WalletEntry } from '../wallet.js'
 import { getPublicClient, SUPPORTED_CHAINS } from '../chains.js'
 import type { ToolModule } from './index.js'
 
@@ -122,7 +122,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        action: { type: 'string', enum: ['create', 'list', 'switch', 'rename', 'delete', 'info', 'balance'], description: 'Action to perform' },
+        action: { type: 'string', enum: ['create', 'list', 'switch', 'rename', 'delete', 'recover_legacy', 'info', 'balance'], description: 'Action to perform' },
         name: { type: 'string', description: 'Wallet name (for create/switch)' },
         oldName: { type: 'string', description: 'Wallet old name (for rename)' },
         newName: { type: 'string', description: 'Wallet new name (for rename)' },
@@ -237,6 +237,23 @@ async function handle(name: string, args: Record<string, unknown>) {
         const w = deleteWallet(args.name as string)
         if (!w) return err(`Wallet "${args.name}" not found.`)
         return text(`🗑️ Wallet "${w.name}" deleted.\nAddress: ${w.address}\n\n⚠️ If you didn't back up the private key, the funds in this wallet are unrecoverable.`)
+      }
+      case 'recover_legacy': {
+        if (!args.name) return err('Missing legacy wallet name or address to recover')
+        const recovered = recoverLegacyWallet(args.name as string)
+        if (!recovered) {
+          return err(
+            `Legacy wallet "${args.name}" was not found in the old unscoped wallet vault.\n` +
+            `If this was created on Railway, make sure the current deployment has the same volume mounted and the same AGNT_PASSPHRASE.`
+          )
+        }
+        return text(
+          `${recovered.alreadyPresent ? 'Legacy wallet already exists in this private vault.' : 'Legacy wallet recovered into this private vault.'}\n` +
+          `Wallet: ${recovered.wallet.name}\n` +
+          `Address: ${recovered.wallet.address}\n` +
+          `Active: yes\n\n` +
+          `Private key was not displayed. You can now check balances or send the funds from this wallet.`
+        )
       }
       case 'info': {
         const w = getActiveWallet()

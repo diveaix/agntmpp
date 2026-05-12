@@ -22,6 +22,11 @@ export interface WalletStore {
   activeIndex: number
 }
 
+function resolveGlobalPath(custom?: string): string {
+  const p = custom || process.env.AGNT_WALLET_PATH || '.agnt/wallets.enc'
+  return isAbsolute(p) ? p : resolve(process.cwd(), p)
+}
+
 function resolvePath(custom?: string): string {
   if (!custom) {
     const scope = getCurrentWalletScope()
@@ -29,12 +34,11 @@ function resolvePath(custom?: string): string {
       const safeScope = createHash('sha256').update(scope, 'utf8').digest('hex').slice(0, 32)
       const baseDir = process.env.AGNT_WALLET_DIR
         ? (isAbsolute(process.env.AGNT_WALLET_DIR) ? process.env.AGNT_WALLET_DIR : resolve(process.cwd(), process.env.AGNT_WALLET_DIR))
-        : resolve(dirname(resolvePath(process.env.AGNT_WALLET_PATH)), 'wallets')
+        : resolve(dirname(resolveGlobalPath(process.env.AGNT_WALLET_PATH)), 'wallets')
       return resolve(baseDir, `${safeScope}.enc`)
     }
   }
-  const p = custom || process.env.AGNT_WALLET_PATH || '.agnt/wallets.enc'
-  return isAbsolute(p) ? p : resolve(process.cwd(), p)
+  return resolveGlobalPath(custom)
 }
 
 function loadStore(custom?: string): WalletStore {
@@ -144,6 +148,28 @@ export function deleteWallet(name: string, custom?: string): WalletEntry | null 
   }
   saveStore(store, custom)
   return deleted
+}
+
+/** Copy a wallet from the old unscoped/global vault into the current scoped vault. */
+export function recoverLegacyWallet(nameOrAddress: string, legacyPath?: string): { wallet: WalletEntry; alreadyPresent: boolean } | null {
+  const legacy = loadStore(resolveGlobalPath(legacyPath))
+  const needle = nameOrAddress.toLowerCase()
+  const source = legacy.wallets.find((w) => w.name.toLowerCase() === needle || w.address.toLowerCase() === needle)
+  if (!source) return null
+
+  const target = loadStore()
+  const existingIndex = target.wallets.findIndex((w) => w.address.toLowerCase() === source.address.toLowerCase())
+  if (existingIndex >= 0) {
+    target.activeIndex = existingIndex
+    saveStore(target)
+    return { wallet: target.wallets[existingIndex], alreadyPresent: true }
+  }
+
+  const copy = { ...source }
+  target.wallets.push(copy)
+  target.activeIndex = target.wallets.length - 1
+  saveStore(target)
+  return { wallet: copy, alreadyPresent: false }
 }
 
 /** Get viem Account from a wallet entry. */

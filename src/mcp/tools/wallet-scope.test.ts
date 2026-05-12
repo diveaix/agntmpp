@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createWallet, listWallets } from '../wallet.js'
+import { createWallet, listWallets, recoverLegacyWallet } from '../wallet.js'
 import { runWithToolContext } from '../tool-context.js'
 
 function testPath(name: string): string {
@@ -11,7 +11,7 @@ async function withWalletPath<T>(fn: () => Promise<T>): Promise<T> {
   const previousWalletPath = process.env.AGNT_WALLET_PATH
   const previousWalletDir = process.env.AGNT_WALLET_DIR
   process.env.AGNT_WALLET_PATH = testPath('scoped-wallet-root')
-  delete process.env.AGNT_WALLET_DIR
+  process.env.AGNT_WALLET_DIR = `./.agnt/test-wallet-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`
   try {
     return await fn()
   } finally {
@@ -70,5 +70,22 @@ test('authenticated wallet scope is stable across API-key sessions', async () =>
 
     assert.equal(seenLater.wallets.length, 1)
     assert.equal(seenLater.wallets[0].address, created.address)
+  })
+})
+
+test('legacy global wallet can be recovered into scoped wallet storage', async () => {
+  await withWalletPath(async () => {
+    const legacy = createWallet('claude2')
+    const scopedBefore = await runWithToolContext({ walletScope: 'mcp-session:recover' }, async () => listWallets())
+    assert.equal(scopedBefore.wallets.length, 0)
+
+    const recovered = await runWithToolContext({ walletScope: 'mcp-session:recover' }, async () => recoverLegacyWallet('claude2'))
+    assert.ok(recovered)
+    assert.equal(recovered.wallet.address, legacy.address)
+    assert.equal(recovered.alreadyPresent, false)
+
+    const scopedAfter = await runWithToolContext({ walletScope: 'mcp-session:recover' }, async () => listWallets())
+    assert.equal(scopedAfter.wallets.length, 1)
+    assert.equal(scopedAfter.wallets[0].address, legacy.address)
   })
 })
