@@ -12,6 +12,7 @@ const TOKEN_ADDRESSES: Record<string, Record<string, `0x${string}`>> = {
   },
   arbitrum: {
     USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    'USDC.E': '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
     USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
     WETH: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
   },
@@ -31,6 +32,7 @@ const TOKEN_ADDRESSES: Record<string, Record<string, `0x${string}`>> = {
   },
   avalanche: {
     USDC: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+    'USDC.E': '0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664',
     WETH: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB',
   },
   bsc: {
@@ -39,6 +41,10 @@ const TOKEN_ADDRESSES: Record<string, Record<string, `0x${string}`>> = {
     WETH: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8',
   },
 }
+
+const erc20BalanceAbi = [
+  { name: 'balanceOf', type: 'function', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view' },
+] as const
 
 export function isNativeToken(value: string | undefined): boolean {
   const normalized = (value || '').trim().toLowerCase()
@@ -62,7 +68,7 @@ export function knownTokenDecimals(chain: string, token: string): number {
   const lower = token.toLowerCase()
   const entries = TOKEN_ADDRESSES[chain] || {}
   const symbol = Object.entries(entries).find(([, address]) => address.toLowerCase() === lower)?.[0]
-  if (symbol === 'USDC' || symbol === 'USDT') return 6
+  if (symbol === 'USDC' || symbol === 'USDC.E' || symbol === 'USDT') return 6
   return 18
 }
 
@@ -70,8 +76,31 @@ export function parseRouteAmount(amount: unknown, decimals: number): bigint {
   const raw = String(amount ?? '').trim()
   if (!raw) throw new Error('Missing amount.')
   if (raw.toLowerCase() === 'max' || raw.toLowerCase() === 'all') throw new Error('max amount must be resolved from balance before quoting.')
-  if (raw.includes('.')) return parseUnits(raw, decimals)
-  return BigInt(raw)
+  return parseUnits(raw, decimals)
+}
+
+export function isMaxRouteAmount(amount: unknown): boolean {
+  const raw = String(amount ?? '').trim().toLowerCase()
+  return raw === 'max' || raw === 'all'
+}
+
+export async function resolveRouteAmount(input: {
+  amount: unknown
+  decimals: number
+  token: string
+  account: `0x${string}`
+  client: PublicClient
+}): Promise<bigint> {
+  if (!isMaxRouteAmount(input.amount)) return parseRouteAmount(input.amount, input.decimals)
+  if (isNativeToken(input.token)) {
+    throw new Error('For native ETH max/all routes, specify an amount so gas can be reserved safely.')
+  }
+  return input.client.readContract({
+    address: input.token as `0x${string}`,
+    abi: erc20BalanceAbi,
+    functionName: 'balanceOf',
+    args: [input.account],
+  }) as Promise<bigint>
 }
 
 export async function estimateNativeTxCost(

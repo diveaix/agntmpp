@@ -7,10 +7,10 @@
 import type { ToolModule } from './index.js'
 import { getOrCreateWallet, getAccount } from '../wallet.js'
 import { getWalletClient as getChainsWalletClient, getPublicClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
-import { decodeFunctionData, encodeFunctionData, formatUnits, parseUnits } from 'viem'
+import { decodeFunctionData, encodeFunctionData, formatUnits } from 'viem'
 import { buildTradeSafetyNotice } from './trade-safety.js'
 import { assessRouteUsdValues, assessRouteValue } from './route-safety.js'
-import { assertNativeBalanceCoversTx, isNativeToken, knownTokenDecimals, parseRouteAmount, resolveTokenAddress } from './aggregator-assets.js'
+import { assertNativeBalanceCoversTx, isNativeToken, knownTokenDecimals, resolveRouteAmount, resolveTokenAddress } from './aggregator-assets.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -117,7 +117,7 @@ const TOOLS = [
         toChain: { type: 'string', description: 'Destination chain. Use hyperliquid for Hyperliquid USDC (Perps).' },
         tokenIn: { type: 'string', description: 'Input token address' },
         tokenOut: { type: 'string', description: 'Output token address. For Hyperliquid USDC (Perps), this defaults to the LI.FI Hyperliquid USDC token.' },
-        amount: { type: 'string', description: 'Amount in smallest unit' },
+        amount: { type: 'string', description: 'Human-readable amount, or all/max for ERC-20 tokens' },
         slippage: { type: 'number', description: 'Slippage %. Default: 1' },
         maxLossPercent: { type: 'number', description: 'Maximum allowed estimated value loss in %. Default 10, cannot be raised above 10.' },
         toAddress: { type: 'string', description: 'Destination address (defaults to sender)' },
@@ -189,8 +189,15 @@ async function handle(name: string, args: Record<string, unknown>) {
     if (!SUPPORTED_CHAINS[fromChain]) return err(`Execution from ${fromChain} is not wired in this server yet.`)
 
     try {
+      const pub = getPublicClient(fromChain)
       const inputDecimals = knownTokenDecimals(fromChain, tokenIn)
-      const amount = parseRouteAmount(rawAmount, inputDecimals).toString()
+      const amount = (await resolveRouteAmount({
+        amount: rawAmount,
+        decimals: inputDecimals,
+        token: tokenIn,
+        account: w.address as `0x${string}`,
+        client: pub,
+      })).toString()
       const qs = new URLSearchParams({
         fromChain: String(fromId),
         toChain: String(toId),
@@ -272,7 +279,6 @@ async function handle(name: string, args: Record<string, unknown>) {
         (await buildTradeSafetyNotice(fromChain, [tokenIn])) +
         (toChain === 'hyperliquid' ? '' : await buildTradeSafetyNotice(toChain, [resolvedTokenOut]))
 
-      const pub = getPublicClient(fromChain)
       const wc = getChainsWalletClient(fromChain, w)
       const txTo = quote.transactionRequest.to as `0x${string}`
       const txData = quote.transactionRequest.data as `0x${string}`
@@ -339,7 +345,14 @@ async function handle(name: string, args: Record<string, unknown>) {
         const rawAmount = args.amount as string
         const decimals = (args.decimals as number) || knownTokenDecimals(fromChain, token)
         const maxLossPercent = Math.min((args.maxLossPercent as number | undefined) ?? 10, 10)
-        const amount = parseUnits(rawAmount, decimals).toString()
+        const pub = getPublicClient(fromChain)
+        const amount = (await resolveRouteAmount({
+          amount: rawAmount,
+          decimals,
+          token,
+          account: w.address as `0x${string}`,
+          client: pub,
+        })).toString()
         const toAddress = (args.toAddress as string) || w.address
 
         const fromId = CHAIN_IDS[fromChain]
@@ -390,7 +403,6 @@ async function handle(name: string, args: Record<string, unknown>) {
           }
 
           const wc = getChainsWalletClient(fromChain, w)
-          const pub = getPublicClient(fromChain)
 
           // Execute each step (usually 1 approval + 1 bridge tx, or just 1 for native)
           let lastHash = ''
@@ -467,7 +479,13 @@ async function handle(name: string, args: Record<string, unknown>) {
         const rawAmount = args.amount as string
         const decimals = (args.decimals as number) || knownTokenDecimals(fromChain, token)
         const maxLossPercent = Math.min((args.maxLossPercent as number | undefined) ?? 10, 10)
-        const amount = parseUnits(rawAmount, decimals).toString()
+        const amount = (await resolveRouteAmount({
+          amount: rawAmount,
+          decimals,
+          token,
+          account: w.address as `0x${string}`,
+          client: getPublicClient(fromChain),
+        })).toString()
 
         const fromId = CHAIN_IDS[fromChain]
         const toId = CHAIN_IDS[toChain]
@@ -544,7 +562,13 @@ async function handle(name: string, args: Record<string, unknown>) {
         const tokenOut = (args.tokenOut as string) || tokenIn
         const rawAmount = args.amount as string
         const decimals = (args.decimals as number) || 6
-        const amount = parseUnits(rawAmount, decimals).toString()
+        const amount = (await resolveRouteAmount({
+          amount: rawAmount,
+          decimals,
+          token: tokenIn,
+          account: w.address as `0x${string}`,
+          client: getPublicClient(fromChain),
+        })).toString()
 
         const fromId = CHAIN_IDS[fromChain]
         const toId = CHAIN_IDS[toChain]
@@ -641,7 +665,14 @@ async function handle(name: string, args: Record<string, unknown>) {
         const tokenOut = (args.tokenOut as string) || tokenIn
         const rawAmount = args.amount as string
         const decimals = (args.decimals as number) || 6
-        const amount = parseUnits(rawAmount, decimals).toString()
+        const quoteWallet = getOrCreateWallet()
+        const amount = (await resolveRouteAmount({
+          amount: rawAmount,
+          decimals,
+          token: tokenIn,
+          account: quoteWallet.address as `0x${string}`,
+          client: getPublicClient(fromChain),
+        })).toString()
 
         const fromId = CHAIN_IDS[fromChain]
         const toId = CHAIN_IDS[toChain]
