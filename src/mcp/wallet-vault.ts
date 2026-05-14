@@ -1,7 +1,8 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'
 import { decrypt, encrypt, getPassphrase } from './crypto.js'
+import { getCurrentWalletScope } from './tool-context.js'
 
 const KEY_LEN = 32
 
@@ -11,9 +12,23 @@ interface WalletVaultStore {
   updatedAt?: string
 }
 
-function resolvePath(custom?: string): string {
+function resolveGlobalPath(custom?: string): string {
   const p = custom || process.env.AGNT_WALLET_VAULT_PATH || '.agnt/wallet-vault.enc'
   return isAbsolute(p) ? p : resolve(process.cwd(), p)
+}
+
+function resolvePath(custom?: string): string {
+  if (!custom) {
+    const scope = getCurrentWalletScope()
+    if (scope) {
+      const safeScope = createHash('sha256').update(scope, 'utf8').digest('hex').slice(0, 32)
+      const baseDir = process.env.AGNT_WALLET_VAULT_DIR
+        ? (isAbsolute(process.env.AGNT_WALLET_VAULT_DIR) ? process.env.AGNT_WALLET_VAULT_DIR : resolve(process.cwd(), process.env.AGNT_WALLET_VAULT_DIR))
+        : resolve(dirname(resolveGlobalPath(process.env.AGNT_WALLET_VAULT_PATH)), 'wallet-vaults')
+      return resolve(baseDir, `${safeScope}.enc`)
+    }
+  }
+  return resolveGlobalPath(custom)
 }
 
 function loadVault(custom?: string): WalletVaultStore {

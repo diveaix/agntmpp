@@ -90,10 +90,16 @@ export async function resolveRouteAmount(input: {
   token: string
   account: `0x${string}`
   client: PublicClient
+  nativeReserve?: unknown
 }): Promise<bigint> {
   if (!isMaxRouteAmount(input.amount)) return parseRouteAmount(input.amount, input.decimals)
   if (isNativeToken(input.token)) {
-    throw new Error('For native ETH max/all routes, specify an amount so gas can be reserved safely.')
+    const reserve = parseRouteAmount(input.nativeReserve ?? process.env.AGNT_NATIVE_MAX_RESERVE_ETH ?? '0.0005', 18)
+    const balance = await input.client.getBalance({ address: input.account })
+    if (balance <= reserve) {
+      throw new Error(`Not enough native ETH to keep a gas reserve. Balance ${formatUnits(balance, 18)} ETH, reserve ${formatUnits(reserve, 18)} ETH.`)
+    }
+    return balance - reserve
   }
   return input.client.readContract({
     address: input.token as `0x${string}`,

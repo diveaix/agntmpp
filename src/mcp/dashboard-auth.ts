@@ -16,7 +16,6 @@ import {
   userHasPassword,
   verifyUserPassword,
 } from './access-store.js'
-import { setWalletExportPassword } from './wallet-vault.js'
 
 export interface StartEmailLoginOptions {
   now?: number
@@ -51,6 +50,11 @@ export interface DashboardSessionContext {
 export interface DashboardPasswordAuthInput {
   email: string
   password: string
+}
+
+export interface DashboardPasswordResetInput extends DashboardPasswordAuthInput {
+  code: string
+  now?: number
 }
 
 const DEFAULT_EMAIL_TTL_MS = 10 * 60_000
@@ -104,7 +108,6 @@ export function signupDashboard(input: DashboardPasswordAuthInput, customStorePa
   if (userHasPassword(existing)) throw new Error('This email already has a dashboard password. Use Login instead.')
   const user = existing || createUser({ email }, customStorePath)
   const updated = setUserPassword(user.id, password, customStorePath)
-  setWalletExportPassword(password)
   return createSessionForUser(updated, customStorePath)
 }
 
@@ -132,7 +135,7 @@ export function startEmailLogin(emailInput: string, customStorePath?: string, op
   return { email, expiresAt, devCode: shouldReturnDevCode() ? code : undefined }
 }
 
-export function verifyEmailLogin(input: VerifyEmailLoginInput, customStorePath?: string): VerifyEmailLoginResult {
+function consumeEmailCode(input: VerifyEmailLoginInput, customStorePath?: string): { email: string; now: number } {
   const email = normalizeEmailAddress(input.email)
   const submitted = typeof input.code === 'string' ? input.code.trim() : ''
   if (!email) throw new Error('Email is required.')
@@ -157,8 +160,23 @@ export function verifyEmailLogin(input: VerifyEmailLoginInput, customStorePath?:
 
   record.consumedAt = new Date(now).toISOString()
   updateEmailVerificationCode(record, customStorePath)
+  return { email, now }
+}
+
+export function verifyEmailLogin(input: VerifyEmailLoginInput, customStorePath?: string): VerifyEmailLoginResult {
+  const { email, now } = consumeEmailCode(input, customStorePath)
   const { user } = resolveOrCreateDashboardAuth(email, customStorePath)
   return createSessionForUser(user, customStorePath, now)
+}
+
+export function resetDashboardPassword(input: DashboardPasswordResetInput, customStorePath?: string): VerifyEmailLoginResult {
+  const password = typeof input.password === 'string' ? input.password : ''
+  if (password.trim().length < 8) throw new Error('Password must be at least 8 characters.')
+  const { email, now } = consumeEmailCode(input, customStorePath)
+  const existing = findUserByEmail(email, customStorePath)
+  if (!existing) throw new Error('No dashboard account exists for this email. Use Signup first.')
+  const updated = setUserPassword(existing.id, password, customStorePath)
+  return createSessionForUser(updated, customStorePath, now)
 }
 
 export function resolveDashboardSession(sessionToken: string | undefined, customStorePath?: string, now = Date.now()): DashboardSessionContext | null {

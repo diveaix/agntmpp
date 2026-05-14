@@ -2,7 +2,6 @@ import type { AuthContext } from '../access-types.js'
 import { applyCryptoAccessPayment, createCryptoAccessQuote } from '../crypto-access.js'
 import { formatBillingCatalog } from '../billing-catalog.js'
 import type { ToolModule } from './index.js'
-import { HACKATHON_DISABLED_MESSAGE, HACKATHON_MODE } from '../../hackathon-mode.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -37,16 +36,6 @@ function titlePlan(plan: string) {
 
 async function handle(name: string, args: Record<string, unknown>, auth?: AuthContext) {
   if (name !== 'billing') return null
-
-  if (HACKATHON_MODE) {
-    return text([
-      'Billing is disabled for hackathon review.',
-      '',
-      HACKATHON_DISABLED_MESSAGE,
-      '',
-      'Use the MCP server directly. Every available tool is free right now.',
-    ].join('\n'))
-  }
 
   switch (args.action) {
     case 'plans':

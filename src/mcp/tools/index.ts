@@ -44,6 +44,7 @@ import protocolsModule from './protocols.js'
 import lendingModule from './lending.js'
 import swapsModule from './swaps.js'
 import bridgesModule from './bridges.js'
+import walletSendModule from './wallet-send.js'
 import dataPlatformsModule from './data-platforms.js'
 import dexIntelModule from './dex-intel.js'
 import accountModule from './account.js'
@@ -65,7 +66,7 @@ import { isSessionCached, cacheSession, recordPayment, recordCall } from '../pay
 
 import { autoRemember } from '../memory.js'
 import { recordToolActivity } from '../activity-log.js'
-import { HACKATHON_MODE } from '../../hackathon-mode.js'
+import { formatTxError } from '../tx-errors.js'
 
 const MODULES: ToolModule[] = [
 
@@ -81,6 +82,7 @@ const MODULES: ToolModule[] = [
   lendingModule,
   bridgesModule,
   swapsModule,
+  walletSendModule,
   dataPlatformsModule,
   dexIntelModule,
   accountModule,
@@ -114,11 +116,6 @@ export async function handleTool(
 ): Promise<ToolResult> {
   return runWithToolContext({ auth, walletScope: walletScope || (auth ? `user:${auth.userId}` : undefined) }, async () => {
   recordCall()
-
-  // Hackathon submission mode: keep every tool callable without MPP/API-key gates.
-  if (HACKATHON_MODE) {
-    return execTool(name, args, auth)
-  }
 
   // ── Free tools: zero overhead ──
   if (isFreeTool(name)) {
@@ -187,10 +184,11 @@ export async function handleTool(
 // ─── Write tools that trigger auto-memory + Telegram ────
 
 const WRITE_TOOLS = new Set([
+  'wallet', 'wallet_send',
   'tempo_swap', 'smart_swap', 'uniswap', 'pancakeswap',
   'tempo_bridge', 'relay', 'debridge', 'jumper',
   'aave', 'morpho', 'lido', 'eigenlayer', 'pendle', 'ethena', 'ondo',
-  'hyperliquid', 'polymarket', 'payment', 'yield',
+  'hyperliquid', 'polymarket', 'payment', 'yield', 'advanced',
 ])
 
 const WRITE_ACTIONS = new Set([
@@ -203,6 +201,7 @@ const WRITE_ACTIONS = new Set([
   'copy_trade', 'dca', 'spot', 'earn', 'vaults', 'staking',
   'stop_loss', 'take_profit', 'batch_buy',
   'deploy_token', 'dao_vote', 'agent_pay',
+  'swap_any_chain',
 ])
 
 function isWriteAction(name: string, args: Record<string, unknown>): boolean {
@@ -220,10 +219,17 @@ async function execTool(name: string, args: Record<string, unknown>, auth?: Auth
     try {
       result = await mod.handle(name, args, auth)
     } catch (e) {
-      return {
-        content: [{ type: 'text', text: `❌ ${e instanceof Error ? e.message : String(e)}` }],
+      const action = typeof args.action === 'string' ? args.action : undefined
+      const errorResult: ToolResult = {
+        content: [{ type: 'text', text: `❌ ${formatTxError(e, { tool: name, action, chain: typeof args.chain === 'string' ? args.chain : undefined })}` }],
         isError: true,
       }
+      if (isWriteAction(name, args)) {
+        try {
+          recordToolActivity(name, args, errorResult, auth)
+        } catch { /* never crash on activity recording */ }
+      }
+      return errorResult
     }
     if (result) {
       if (isWriteAction(name, args)) {

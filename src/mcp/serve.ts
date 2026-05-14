@@ -25,6 +25,7 @@ import { TEMPO_CHAIN, TOKENS } from './config.js'
 import { ALL_TOOLS, handleTool, TOOL_COUNT, initSkills } from './tools/index.js'
 import { SUPPORTED_CHAINS } from './chains.js'
 import { getToolTier, getToolPrice } from './pricing.js'
+import { PRICING } from './mpp.js'
 import { getStats } from './payment-tracker.js'
 import { submitTask, getTask, cancelTask, listTasks, getTaskStats } from './a2a.js'
 import { scheduleNewAutomation, startAutomationRunner, unscheduleAutomation } from './automation-runner.js'
@@ -66,16 +67,20 @@ import {
   setDashboardWalletPassword,
 } from './dashboard-wallets.js'
 import { listActivityForUser } from './activity-log.js'
+import { runWithToolContext } from './tool-context.js'
 import {
   logoutDashboardSession,
   loginDashboard,
+  resetDashboardPassword,
   resolveDashboardSession,
   signupDashboard,
   startEmailLogin,
   verifyEmailLogin,
   type DashboardSessionContext,
 } from './dashboard-auth.js'
-import { HACKATHON_DISABLED_MESSAGE, HACKATHON_MODE } from '../hackathon-mode.js'
+import { setWalletExportPassword } from './wallet-vault.js'
+import { formatBillingCatalog } from './billing-catalog.js'
+import { ACCESS_PAUSED, FEATURE_DISABLED_MESSAGE } from '../product-mode.js'
 
 // ─── Create MCP Server instance ──────────────────────────
 
@@ -98,7 +103,7 @@ function createMcpServer(auth?: AuthContext, walletScope?: string | (() => strin
   }))
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     if (req.params.uri === 'agnt://plans') {
-      return { contents: [{ uri: 'agnt://plans', mimeType: 'text/plain', text: HACKATHON_DISABLED_MESSAGE }] }
+      return { contents: [{ uri: 'agnt://plans', mimeType: 'text/plain', text: formatBillingCatalog() }] }
     }
     return {
     contents: [{ uri: 'agnt://info', mimeType: 'text/plain', text:
@@ -143,21 +148,8 @@ function getHeaderString(value: string | string[] | undefined): string | undefin
 
 function resolvePersistentWalletScope(req: express.Request, auth?: AuthContext): string {
   if (auth) return `user:${auth.userId}`
-
-  const explicitClientId =
-    getHeaderString(req.headers['x-agnt-client-id']) ||
-    getHeaderString(req.headers['x-client-id']) ||
-    (typeof req.query.clientId === 'string' ? req.query.clientId : undefined)
-
-  if (explicitClientId?.trim()) {
-    return `client:${explicitClientId.trim()}`
-  }
-
-  const forwardedFor = getHeaderString(req.headers['x-forwarded-for']) || req.ip || req.socket.remoteAddress || 'unknown-ip'
-  const userAgent = getHeaderString(req.headers['user-agent']) || 'unknown-agent'
-  const host = getHeaderString(req.headers.host) || 'unknown-host'
-  const fingerprint = crypto.createHash('sha256').update(`${host}|${forwardedFor}|${userAgent}`).digest('hex').slice(0, 32)
-  return `anonymous:${fingerprint}`
+  if (!isAccessRequired()) return 'local:dev'
+  throw new Error('Authenticated API key or connector token is required before wallets can be used.')
 }
 
 function parseCookies(req: express.Request): Record<string, string> {
@@ -199,10 +191,6 @@ function requireDashboardAuth(req: express.Request, res: express.Response, next:
   next()
 }
 
-function hasPaidDashboardAccess(auth: AuthContext): boolean {
-  return (auth.plan === 'pro' || auth.plan === 'max') && (auth.subscriptionStatus === 'active' || auth.subscriptionStatus === 'trialing')
-}
-
 function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   const adminToken = process.env.AGNT_ADMIN_TOKEN
   if (!adminToken) {
@@ -217,6 +205,69 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
   next()
 }
 
+function buildDashboardHistory(userId: string) {
+  const automations = listAutomationsForUser(userId)
+  const automationHistory = automations.flatMap((automation) => automation.history.map((entry) => ({
+    kind: 'automation',
+    automationId: automation.id,
+    automationName: automation.name,
+    title: automation.name,
+    type: automation.type,
+    ...entry,
+  })))
+  const activityHistory = listActivityForUser(userId, {
+    limit: 100,
+  }).map((entry) => ({
+    kind: 'tool',
+    automationId: entry.id,
+    automationName: entry.title,
+    title: entry.title,
+    type: entry.tool,
+    time: entry.time,
+    result: entry.txHash ? `${entry.result}\nTx: ${entry.txHash}` : entry.result,
+    success: entry.success,
+  }))
+  return [...automationHistory, ...activityHistory]
+    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+}
+
+async function buildDashboardSnapshot(dashboard: DashboardSessionContext, hostHeader?: string) {
+  const store = loadAccessStore()
+  const usage = store.usage.find((entry) => entry.userId === dashboard.user.id) || null
+  const customSources = listCustomSources(dashboard.user.id)
+  const automations = listAutomationsForUser(dashboard.user.id)
+  const wallets = await runWithToolContext(
+    { auth: dashboard.auth, walletScope: `user:${dashboard.user.id}` },
+    () => getDashboardWallets(hostHeader),
+  )
+  const me = {
+    user: dashboard.user,
+    plan: dashboard.auth.plan,
+    subscriptionStatus: dashboard.auth.subscriptionStatus,
+    entitlement: dashboard.auth.entitlement,
+    subscription: getCurrentSubscription(dashboard.user.id),
+    usage,
+    counts: {
+      automations: automations.length,
+      activeAutomations: automations.filter((automation) => automation.status === 'active').length,
+      customSources: customSources.length,
+    },
+    apiKeys: listApiKeysForUser(dashboard.user.id),
+  }
+  return {
+    me,
+    apiKeys: me.apiKeys,
+    connectorLinks: listConnectorLinksForUser(dashboard.user.id),
+    automations,
+    history: buildDashboardHistory(dashboard.user.id),
+    sources: customSources,
+    sourceLimit: dashboard.auth.entitlement.customSourceSlots,
+    wallets: wallets.wallets,
+    walletExportAvailable: wallets.exportAvailable,
+    walletPasswordSet: wallets.passwordSet,
+  }
+}
+
 function requireAccessAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const auth = resolveAuthContextFromRequest(req.headers, req.originalUrl || req.url)
   if (!auth) {
@@ -227,11 +278,11 @@ function requireAccessAuth(req: express.Request, res: express.Response, next: ex
   next()
 }
 
-function sendHackathonDisabled(res: express.Response, feature: string) {
+function sendFeatureDisabled(res: express.Response, feature: string) {
   res.status(403).json({
-    error: 'hackathon_mode_disabled',
+    error: 'feature_disabled',
     feature,
-    error_description: HACKATHON_DISABLED_MESSAGE,
+    error_description: FEATURE_DISABLED_MESSAGE,
   })
 }
 
@@ -279,7 +330,11 @@ app.post('/token', express.json(), express.urlencoded({ extended: true }), (req,
   // Validate credentials
   // For production, this should verify against a DB of registered clients.
   // We use the passphrase as a simple master secret for now.
-  const validSecret = process.env.AGNT_PASSPHRASE || 'demo_secret'
+  const validSecret = process.env.AGNT_PASSPHRASE
+  if (!validSecret) {
+    res.status(403).json({ error: 'oauth_disabled', error_description: 'Legacy OAuth token issuing is disabled. Use AGNT API keys or connector tokens.' })
+    return
+  }
   if (clientSecret !== validSecret) {
     res.status(401).json({ error: 'invalid_client' })
     return
@@ -298,7 +353,7 @@ app.post('/token', express.json(), express.urlencoded({ extended: true }), (req,
 // When AGNT_PASSPHRASE is not set, auth is skipped (open dev mode).
 // Set AGNT_PASSPHRASE in .env to enforce JWT protection in production.
 const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (HACKATHON_MODE) {
+  if (ACCESS_PAUSED) {
     const accessAuth = resolveAuthContextFromRequest(req.headers, req.originalUrl || req.url)
     if (accessAuth) {
       ;(req as AuthedRequest).agntAuth = accessAuth
@@ -312,21 +367,52 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
     return next()
   }
 
-  if (!process.env.AGNT_PASSPHRASE && !isAccessRequired()) return next()
+  if (!isAccessRequired()) return next()
 
+  res.status(401).json({
+    error: 'invalid_api_key',
+    error_description: 'Provide x-agnt-api-key, Authorization: Bearer agnt_live_..., or a valid AGNT connector token.',
+  })
+}
+
+function getSessionAuthOrReject(req: express.Request, res: express.Response): AuthContext | undefined {
+  const auth = getAuthForRequest(req)
+  if (auth || !isAccessRequired()) return auth
+  res.status(401).json({
+    error: 'invalid_api_key',
+    error_description: 'Authenticated wallet access requires an API key or connector token.',
+  })
+  return undefined
+}
+
+/*
+  Legacy JWT token support remains exposed for old clients that probe OAuth
+  metadata, but MCP wallet access no longer accepts those tokens. Every hosted
+  wallet scope must resolve to an AGNT user through an API key or connector.
+*/
+function verifyLegacyJwt(req: express.Request): boolean {
   const authHeader = req.headers.authorization
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'invalid_token', error_description: 'Missing or invalid Bearer token' })
-    return
-  }
-  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false
   const token = authHeader.split(' ')[1]
   try {
     jwt.verify(token, JWT_SECRET)
-    next()
-  } catch (err) {
-    res.status(401).json({ error: 'invalid_token', error_description: 'Token expired or invalid' })
+    return true
+  } catch {
+    return false
   }
+}
+
+function requireLegacyJwtOrAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const accessAuth = resolveAuthContextFromRequest(req.headers, req.originalUrl || req.url)
+  if (accessAuth) {
+    ;(req as AuthedRequest).agntAuth = accessAuth
+    return next()
+  }
+  if (!isAccessRequired() || verifyLegacyJwt(req)) {
+    next()
+    return
+  }
+  res.status(401).json({ error: 'invalid_token', error_description: 'Missing or invalid token' })
 }
 
 // ─── Streamable HTTP Transport (modern — used by Antigravity, etc.) ───
@@ -542,12 +628,12 @@ function applyStripeEvent(event: Record<string, unknown>): { processed: boolean;
   return { processed: true, summary: `Stored idempotency for unsupported event ${type}.` }
 }
 
-if (HACKATHON_MODE) {
-  app.use('/access', (_req, res) => sendHackathonDisabled(res, 'access and API keys'))
-  app.use('/auth', (_req, res) => sendHackathonDisabled(res, 'login and signup'))
-  app.use('/dashboard', (_req, res) => sendHackathonDisabled(res, 'dashboard'))
-  app.use('/public/checkout', (_req, res) => sendHackathonDisabled(res, 'checkout'))
-  app.use('/billing', (_req, res) => sendHackathonDisabled(res, 'billing'))
+if (ACCESS_PAUSED) {
+  app.use('/access', (_req, res) => sendFeatureDisabled(res, 'access and API keys'))
+  app.use('/auth', (_req, res) => sendFeatureDisabled(res, 'login and signup'))
+  app.use('/dashboard', (_req, res) => sendFeatureDisabled(res, 'dashboard'))
+  app.use('/public/checkout', (_req, res) => sendFeatureDisabled(res, 'checkout'))
+  app.use('/billing', (_req, res) => sendFeatureDisabled(res, 'billing'))
 }
 
 app.post('/access/bootstrap', requireAdmin, express.json(), (req, res) => {
@@ -614,10 +700,13 @@ app.post('/auth/email/start', express.json(), (req, res) => {
   }
 })
 
-app.post('/auth/signup', express.json(), (req, res) => {
+app.post('/auth/signup', express.json(), async (req, res) => {
   try {
     const body = req.body as { email?: string; password?: string }
     const result = signupDashboard({ email: body.email || '', password: body.password || '' })
+    await runWithToolContext({ auth: result.auth, walletScope: `user:${result.user.id}` }, async () => {
+      setWalletExportPassword(body.password || '')
+    })
     setDashboardCookie(res, result.sessionToken)
     res.json({
       user: result.user,
@@ -627,6 +716,25 @@ app.post('/auth/signup', express.json(), (req, res) => {
     })
   } catch (e) {
     res.status(400).json({ error: 'signup_failed', error_description: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+app.post('/auth/password/reset', express.json(), async (req, res) => {
+  try {
+    const body = req.body as { email?: string; code?: string; password?: string }
+    const result = resetDashboardPassword({ email: body.email || '', code: body.code || '', password: body.password || '' })
+    await runWithToolContext({ auth: result.auth, walletScope: `user:${result.user.id}` }, async () => {
+      setWalletExportPassword(body.password || '')
+    })
+    setDashboardCookie(res, result.sessionToken)
+    res.json({
+      user: result.user,
+      plan: result.auth.plan,
+      subscriptionStatus: result.auth.subscriptionStatus,
+      entitlement: result.auth.entitlement,
+    })
+  } catch (e) {
+    res.status(400).json({ error: 'password_reset_failed', error_description: e instanceof Error ? e.message : String(e) })
   }
 })
 
@@ -670,51 +778,31 @@ app.post('/auth/logout', (req, res) => {
 
 app.get('/dashboard/me', requireDashboardAuth, (req, res) => {
   const dashboard = (req as AuthedRequest).dashboard!
-  const store = loadAccessStore()
-  const usage = store.usage.find((entry) => entry.userId === dashboard.user.id) || null
-  const customSources = listCustomSources(dashboard.user.id)
-  const automations = listAutomationsForUser(dashboard.user.id)
-  res.json({
-    user: dashboard.user,
-    plan: dashboard.auth.plan,
-    subscriptionStatus: dashboard.auth.subscriptionStatus,
-    entitlement: dashboard.auth.entitlement,
-    subscription: getCurrentSubscription(dashboard.user.id),
-    usage,
-    counts: {
-      automations: automations.length,
-      activeAutomations: automations.filter((automation) => automation.status === 'active').length,
-      customSources: customSources.length,
-    },
-    apiKeys: hasPaidDashboardAccess(dashboard.auth) ? listApiKeysForUser(dashboard.user.id) : [],
-  })
+  buildDashboardSnapshot(dashboard, req.headers.host)
+    .then((snapshot) => res.json(snapshot.me))
+    .catch((e) => res.status(400).json({ error: 'dashboard_unavailable', error_description: e instanceof Error ? e.message : String(e) }))
+})
+
+app.get('/dashboard/snapshot', requireDashboardAuth, (req, res) => {
+  const dashboard = (req as AuthedRequest).dashboard!
+  buildDashboardSnapshot(dashboard, req.headers.host)
+    .then((snapshot) => res.json(snapshot))
+    .catch((e) => res.status(400).json({ error: 'dashboard_unavailable', error_description: e instanceof Error ? e.message : String(e) }))
 })
 
 app.get('/dashboard/api-keys', requireDashboardAuth, (req, res) => {
   const dashboard = (req as AuthedRequest).dashboard!
-  if (!hasPaidDashboardAccess(dashboard.auth)) {
-    res.json({ apiKeys: [] })
-    return
-  }
   res.json({ apiKeys: listApiKeysForUser(dashboard.user.id) })
 })
 
 app.get('/dashboard/connector-links', requireDashboardAuth, (req, res) => {
   const dashboard = (req as AuthedRequest).dashboard!
-  if (!hasPaidDashboardAccess(dashboard.auth)) {
-    res.json({ connectorLinks: [] })
-    return
-  }
   res.json({ connectorLinks: listConnectorLinksForUser(dashboard.user.id) })
 })
 
 app.post('/dashboard/api-keys', requireDashboardAuth, express.json(), (req, res) => {
   try {
     const dashboard = (req as AuthedRequest).dashboard!
-    if (!hasPaidDashboardAccess(dashboard.auth)) {
-      res.status(403).json({ error: 'paid_plan_required', error_description: 'API keys are available on Pro and Ultra plans only.' })
-      return
-    }
     const body = req.body as { label?: string }
     const result = createApiKey(dashboard.user.id, body.label || 'dashboard')
     res.json({
@@ -731,10 +819,6 @@ app.post('/dashboard/api-keys', requireDashboardAuth, express.json(), (req, res)
 app.post('/dashboard/connector-links', requireDashboardAuth, express.json(), (req, res) => {
   try {
     const dashboard = (req as AuthedRequest).dashboard!
-    if (!hasPaidDashboardAccess(dashboard.auth)) {
-      res.status(403).json({ error: 'paid_plan_required', error_description: 'Claude connector links are available on Pro and Ultra plans only.' })
-      return
-    }
     const body = req.body as { label?: string; client?: string; apiKeyId?: string }
     const result = createConnectorLink(dashboard.user.id, {
       label: body.label || 'Claude connector',
@@ -755,10 +839,6 @@ app.post('/dashboard/connector-links', requireDashboardAuth, express.json(), (re
 
 app.get('/dashboard/api-keys/:id/reveal', requireDashboardAuth, (req, res) => {
   const dashboard = (req as AuthedRequest).dashboard!
-  if (!hasPaidDashboardAccess(dashboard.auth)) {
-    res.status(403).json({ error: 'paid_plan_required', error_description: 'API key reveal is available on Pro and Ultra plans only.' })
-    return
-  }
   const apiKey = revealApiKey(dashboard.user.id, String(req.params.id))
   if (!apiKey) {
     res.status(404).json({ error: 'api_key_unavailable', error_description: 'Older keys cannot be revealed. Create a new key if you need to copy it again.' })
@@ -794,40 +874,16 @@ app.get('/dashboard/automations', requireDashboardAuth, (req, res) => {
 
 app.get('/dashboard/history', requireDashboardAuth, (req, res) => {
   const dashboard = (req as AuthedRequest).dashboard!
-  const automations = listAutomationsForUser(dashboard.user.id)
-  const automationHistory = automations.flatMap((automation) => automation.history.map((entry) => ({
-    kind: 'automation',
-    automationId: automation.id,
-    automationName: automation.name,
-    title: automation.name,
-    type: automation.type,
-    ...entry,
-  })))
-  const activityHistory = listActivityForUser(dashboard.user.id, {
-    limit: 100,
-  }).map((entry) => ({
-    kind: 'tool',
-    automationId: entry.id,
-    automationName: entry.title,
-    title: entry.title,
-    type: entry.tool,
-    time: entry.time,
-    result: entry.txHash ? `${entry.result}\nTx: ${entry.txHash}` : entry.result,
-    success: entry.success,
-  }))
-  const history = [...automationHistory, ...activityHistory]
-    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-  res.json({ history })
+  res.json({ history: buildDashboardHistory(dashboard.user.id) })
 })
 
 app.get('/dashboard/wallets', requireDashboardAuth, async (req, res) => {
   try {
     const dashboard = (req as AuthedRequest).dashboard!
-    if (!hasPaidDashboardAccess(dashboard.auth)) {
-      res.json({ wallets: [], activeIndex: -1, exportAvailable: false, passwordSet: false })
-      return
-    }
-    const wallets = await getDashboardWallets(req.headers.host)
+    const wallets = await runWithToolContext(
+      { auth: dashboard.auth, walletScope: `user:${dashboard.user.id}` },
+      () => getDashboardWallets(req.headers.host),
+    )
     res.json(wallets)
   } catch (e) {
     res.status(400).json({ error: 'wallets_unavailable', error_description: e instanceof Error ? e.message : String(e) })
@@ -836,9 +892,13 @@ app.get('/dashboard/wallets', requireDashboardAuth, async (req, res) => {
 
 app.post('/dashboard/wallets/password', requireDashboardAuth, express.json(), (req, res) => {
   try {
+    const dashboard = (req as AuthedRequest).dashboard!
     const body = req.body as { password?: string }
-    const result = setDashboardWalletPassword(req.headers.host, body.password || '')
-    res.json(result)
+    runWithToolContext(
+      { auth: dashboard.auth, walletScope: `user:${dashboard.user.id}` },
+      async () => setDashboardWalletPassword(req.headers.host, body.password || ''),
+    ).then((result) => res.json(result))
+      .catch((e) => res.status(400).json({ error: 'wallet_password_failed', error_description: e instanceof Error ? e.message : String(e) }))
   } catch (e) {
     res.status(400).json({ error: 'wallet_password_failed', error_description: e instanceof Error ? e.message : String(e) })
   }
@@ -846,9 +906,13 @@ app.post('/dashboard/wallets/password', requireDashboardAuth, express.json(), (r
 
 app.post('/dashboard/wallets/:name/reveal', requireDashboardAuth, express.json(), (req, res) => {
   try {
+    const dashboard = (req as AuthedRequest).dashboard!
     const body = req.body as { password?: string }
-    const result = revealDashboardWalletPrivateKey(req.headers.host, String(req.params.name), body.password || '')
-    res.json(result)
+    runWithToolContext(
+      { auth: dashboard.auth, walletScope: `user:${dashboard.user.id}` },
+      async () => revealDashboardWalletPrivateKey(req.headers.host, String(req.params.name), body.password || ''),
+    ).then((result) => res.json(result))
+      .catch((e) => res.status(400).json({ error: 'wallet_reveal_failed', error_description: e instanceof Error ? e.message : String(e) }))
   } catch (e) {
     res.status(400).json({ error: 'wallet_reveal_failed', error_description: e instanceof Error ? e.message : String(e) })
   }
@@ -857,13 +921,12 @@ app.post('/dashboard/wallets/:name/reveal', requireDashboardAuth, express.json()
 app.delete('/dashboard/wallets/:name', requireDashboardAuth, express.json(), (req, res) => {
   try {
     const dashboard = (req as AuthedRequest).dashboard!
-    if (!hasPaidDashboardAccess(dashboard.auth)) {
-      res.status(403).json({ error: 'paid_plan_required', error_description: 'Wallet management is available on Pro and Ultra plans only.' })
-      return
-    }
     const body = req.body as { password?: string }
-    const result = deleteDashboardWallet(req.headers.host, String(req.params.name), body.password || '')
-    res.json(result)
+    runWithToolContext(
+      { auth: dashboard.auth, walletScope: `user:${dashboard.user.id}` },
+      async () => deleteDashboardWallet(req.headers.host, String(req.params.name), body.password || ''),
+    ).then((result) => res.json(result))
+      .catch((e) => res.status(400).json({ error: 'wallet_delete_failed', error_description: e instanceof Error ? e.message : String(e) }))
   } catch (e) {
     res.status(400).json({ error: 'wallet_delete_failed', error_description: e instanceof Error ? e.message : String(e) })
   }
@@ -1095,12 +1158,12 @@ app.post('/billing/webhook/stripe', express.raw({ type: 'application/json' }), (
 })
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', sessions: sseSessions.size + streamableSessions.size, tools: TOOL_COUNT, version: '2.1.0', mpp: !HACKATHON_MODE, hackathonMode: HACKATHON_MODE, timestamp: new Date().toISOString() })
+  res.json({ status: 'ok', sessions: sseSessions.size + streamableSessions.size, tools: TOOL_COUNT, version: '2.1.0', mpp: !ACCESS_PAUSED, accessPaused: ACCESS_PAUSED, timestamp: new Date().toISOString() })
 })
 
 app.get('/pricing', (_req, res) => {
   const table = ALL_TOOLS.map(t => ({ name: t.name, tier: getToolTier(t.name), price: getToolPrice(t.name) }))
-  res.json({ tools: table, tiers: { free: '$0', standard: '$0', premium: '$0' }, currency: 'USDC.e', hackathonMode: HACKATHON_MODE })
+  res.json({ tools: table, tiers: { free: '$0', standard: PRICING.standard, premium: PRICING.premium }, currency: 'USDC.e', accessPaused: ACCESS_PAUSED })
 })
 
 app.get('/stats', (_req, res) => {

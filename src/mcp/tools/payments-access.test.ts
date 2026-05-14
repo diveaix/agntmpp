@@ -20,7 +20,7 @@ import {
 } from '../access-store.js'
 import { canRunOwnedAutomation, verifyStripeSignature } from '../access-control.js'
 import { createAutomation, loadAutomations } from '../scheduler.js'
-import automationsModule from './automations.js'
+import automationsModule, { setAutomationReadinessProbeForTests } from './automations.js'
 import billingModule from './billing.js'
 import accountModule from './account.js'
 import {
@@ -36,12 +36,12 @@ import {
 import {
   logoutDashboardSession,
   loginDashboard,
+  resetDashboardPassword,
   resolveDashboardSession,
   signupDashboard,
   startEmailLogin,
   verifyEmailLogin,
 } from '../dashboard-auth.js'
-import { verifyWalletExportPassword } from '../wallet-vault.js'
 import { deriveSourceState } from '../automation-source-manager.js'
 import { OnChainErc20PaymentVerifier, type Erc20PaymentVerifierClient } from '../crypto-payment-verifier.js'
 
@@ -63,17 +63,6 @@ function withAccessPath<T>(path: string, fn: () => T): T {
   } finally {
     if (previous === undefined) delete process.env.AGNT_ACCESS_STORE_PATH
     else process.env.AGNT_ACCESS_STORE_PATH = previous
-  }
-}
-
-function withWalletVaultPath<T>(path: string, fn: () => T): T {
-  const previous = process.env.AGNT_WALLET_VAULT_PATH
-  process.env.AGNT_WALLET_VAULT_PATH = path
-  try {
-    return fn()
-  } finally {
-    if (previous === undefined) delete process.env.AGNT_WALLET_VAULT_PATH
-    else process.env.AGNT_WALLET_VAULT_PATH = previous
   }
 }
 
@@ -182,21 +171,48 @@ test('email login requires the right code and creates a dashboard session', () =
   assert.equal(resolveDashboardSession(verified.sessionToken, path), null)
 })
 
-test('dashboard signup sets account password and wallet export password', () => {
+test('dashboard signup sets account password', () => {
   const path = testPath('password-signup')
-  const vaultPath = testPath('password-signup-vault')
-  withWalletVaultPath(vaultPath, () => {
-    const signedUp = signupDashboard({ email: 'password@example.com', password: 'password123' }, path)
-    assert.equal(signedUp.user.email, 'password@example.com')
-    assert.equal(signedUp.auth.plan, 'free')
-    assert.equal(verifyWalletExportPassword('password123'), true)
-    assert.throws(() => signupDashboard({ email: 'password@example.com', password: 'another-password' }, path), /already has a dashboard password/i)
+  const signedUp = signupDashboard({ email: 'password@example.com', password: 'password123' }, path)
+  assert.equal(signedUp.user.email, 'password@example.com')
+  assert.equal(signedUp.auth.plan, 'free')
+  assert.throws(() => signupDashboard({ email: 'password@example.com', password: 'another-password' }, path), /already has a dashboard password/i)
 
-    const loggedIn = loginDashboard({ email: 'password@example.com', password: 'password123' }, path)
-    assert.equal(loggedIn.user.id, signedUp.user.id)
-    assert.equal(resolveDashboardSession(loggedIn.sessionToken, path)?.user.id, signedUp.user.id)
-    assert.throws(() => loginDashboard({ email: 'password@example.com', password: 'wrong-password' }, path), /not correct/i)
-  })
+  const loggedIn = loginDashboard({ email: 'password@example.com', password: 'password123' }, path)
+  assert.equal(loggedIn.user.id, signedUp.user.id)
+  assert.equal(resolveDashboardSession(loggedIn.sessionToken, path)?.user.id, signedUp.user.id)
+  assert.throws(() => loginDashboard({ email: 'password@example.com', password: 'wrong-password' }, path), /not correct/i)
+})
+
+test('dashboard password reset uses a temporary one-time email code', () => {
+  const path = testPath('password-reset')
+  const user = createUser({ email: 'legacy-reset@example.com' }, path)
+
+  const started = startEmailLogin('legacy-reset@example.com', path)
+  const reset = resetDashboardPassword({
+    email: 'legacy-reset@example.com',
+    code: started.devCode!,
+    password: 'new-password-123',
+  }, path)
+
+  assert.equal(reset.user.id, user.id)
+  assert.equal(loginDashboard({ email: 'legacy-reset@example.com', password: 'new-password-123' }, path).user.id, user.id)
+  assert.throws(() => resetDashboardPassword({
+    email: 'legacy-reset@example.com',
+    code: started.devCode!,
+    password: 'another-password-123',
+  }, path), /expired/i)
+})
+
+test('dashboard password reset does not create accounts for unknown emails', () => {
+  const path = testPath('password-reset-unknown')
+  const started = startEmailLogin('unknown-reset@example.com', path)
+
+  assert.throws(() => resetDashboardPassword({
+    email: 'unknown-reset@example.com',
+    code: started.devCode!,
+    password: 'new-password-123',
+  }, path), /No dashboard account/i)
 })
 
 test('email login allows free dashboard access without upgrading plan', () => {
@@ -285,40 +301,45 @@ test('owner-specific data automation slots are enforced from auth context', asyn
   createApiKey(user.id, 'free', accessPath, 'agnt_live_slots')
   const auth = resolveAuthContextFromApiKey('agnt_live_slots', accessPath)!
 
-  const first = await automationsModule.handle('automations', {
-    action: 'create_event',
-    topic: 'iran_israel_conflict',
-    eventType: 'military_attack',
-    actor: 'Iran',
-    target: 'Israel',
-    protocol: 'polymarket',
-    marketId: 'm1',
-    side: 'YES',
-    maxSpend: 10,
-    maxPrice: 0.65,
-    mode: 'notify_only',
-    validFor: '1h',
-  }, auth)
-  assert.equal(first?.isError, undefined)
+  setAutomationReadinessProbeForTests(async () => ({ allowed: true }))
+  try {
+    const first = await automationsModule.handle('automations', {
+      action: 'create_event',
+      topic: 'iran_israel_conflict',
+      eventType: 'military_attack',
+      actor: 'Iran',
+      target: 'Israel',
+      protocol: 'polymarket',
+      marketId: 'm1',
+      side: 'YES',
+      maxSpend: 10,
+      maxPrice: 0.65,
+      mode: 'notify_only',
+      validFor: '1h',
+    }, auth)
+    assert.equal(first?.isError, undefined)
 
-  const second = await automationsModule.handle('automations', {
-    action: 'create_event',
-    plan: 'max',
-    topic: 'iran_israel_conflict',
-    eventType: 'military_attack',
-    actor: 'Iran',
-    target: 'Israel',
-    protocol: 'polymarket',
-    marketId: 'm2',
-    side: 'YES',
-    maxSpend: 10,
-    maxPrice: 0.65,
-    mode: 'notify_only',
-    validFor: '1h',
-  }, auth)
+    const second = await automationsModule.handle('automations', {
+      action: 'create_event',
+      plan: 'max',
+      topic: 'iran_israel_conflict',
+      eventType: 'military_attack',
+      actor: 'Iran',
+      target: 'Israel',
+      protocol: 'polymarket',
+      marketId: 'm2',
+      side: 'YES',
+      maxSpend: 10,
+      maxPrice: 0.65,
+      mode: 'notify_only',
+      validFor: '1h',
+    }, auth)
 
-  assert.equal(second?.isError, true)
-  assert.match(second?.content[0].text || '', /free plan allows 1 data automation/i)
+    assert.equal(second?.isError, true)
+    assert.match(second?.content[0].text || '', /free plan allows 1 data automation/i)
+  } finally {
+    setAutomationReadinessProbeForTests(null)
+  }
 })
 
 test('automation list is filtered by authenticated owner', async () => {
@@ -333,41 +354,46 @@ test('automation list is filtered by authenticated owner', async () => {
   const authA = resolveAuthContextFromApiKey('agnt_live_owner_a', accessPath)!
   const authB = resolveAuthContextFromApiKey('agnt_live_owner_b', accessPath)!
 
-  await automationsModule.handle('automations', {
-    action: 'create_event',
-    topic: 'iran_israel_conflict',
-    eventType: 'military_attack',
-    actor: 'Iran',
-    target: 'Israel',
-    protocol: 'polymarket',
-    marketId: 'market-a',
-    side: 'YES',
-    maxSpend: 10,
-    maxPrice: 0.65,
-    mode: 'notify_only',
-    validFor: '1h',
-    name: 'Owner A automation',
-  }, authA)
-  await automationsModule.handle('automations', {
-    action: 'create_event',
-    topic: 'iran_israel_conflict',
-    eventType: 'military_attack',
-    actor: 'Iran',
-    target: 'Israel',
-    protocol: 'polymarket',
-    marketId: 'market-b',
-    side: 'YES',
-    maxSpend: 10,
-    maxPrice: 0.65,
-    mode: 'notify_only',
-    validFor: '1h',
-    name: 'Owner B automation',
-  }, authB)
+  setAutomationReadinessProbeForTests(async () => ({ allowed: true }))
+  try {
+    await automationsModule.handle('automations', {
+      action: 'create_event',
+      topic: 'iran_israel_conflict',
+      eventType: 'military_attack',
+      actor: 'Iran',
+      target: 'Israel',
+      protocol: 'polymarket',
+      marketId: 'market-a',
+      side: 'YES',
+      maxSpend: 10,
+      maxPrice: 0.65,
+      mode: 'notify_only',
+      validFor: '1h',
+      name: 'Owner A automation',
+    }, authA)
+    await automationsModule.handle('automations', {
+      action: 'create_event',
+      topic: 'iran_israel_conflict',
+      eventType: 'military_attack',
+      actor: 'Iran',
+      target: 'Israel',
+      protocol: 'polymarket',
+      marketId: 'market-b',
+      side: 'YES',
+      maxSpend: 10,
+      maxPrice: 0.65,
+      mode: 'notify_only',
+      validFor: '1h',
+      name: 'Owner B automation',
+    }, authB)
 
-  const listA = await automationsModule.handle('automations', { action: 'list' }, authA)
-  const output = listA?.content[0].text || ''
-  assert.match(output, /Owner A automation/)
-  assert.doesNotMatch(output, /Owner B automation/)
+    const listA = await automationsModule.handle('automations', { action: 'list' }, authA)
+    const output = listA?.content[0].text || ''
+    assert.match(output, /Owner A automation/)
+    assert.doesNotMatch(output, /Owner B automation/)
+  } finally {
+    setAutomationReadinessProbeForTests(null)
+  }
 })
 
 test('worker access check pauses past-due owned automation', () => {
@@ -710,7 +736,7 @@ test('on-chain verifier rejects insufficient confirmations and wrong chain', asy
   assert.match(wrongChain.reason, /chain/i)
 })
 
-test('account register explains free users do not need MCP registration', async () => {
+test('account register explains dashboard account creation owns API keys', async () => {
   const accessPath = testPath('account-no-register')
   await withAccessPathAsync(accessPath, async () => {
     const result = await accountModule.handle('account', { action: 'register', email: 'new@example.com' })
@@ -718,9 +744,9 @@ test('account register explains free users do not need MCP registration', async 
     const store = loadAccessStore(accessPath)
 
     assert.equal(toolIsError(result), true)
-    assert.match(output, /Free users do not need registration/i)
-    assert.match(output, /website checkout/i)
-    assert.match(output, /API key/i)
+    assert.match(output, /AGNT dashboard/i)
+    assert.match(output, /API keys/i)
+    assert.match(output, /connector URLs/i)
     assert.equal(store.users.length, 0)
     assert.equal(store.apiKeys.length, 0)
   })

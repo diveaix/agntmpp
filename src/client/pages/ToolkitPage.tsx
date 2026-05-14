@@ -87,7 +87,7 @@ export default function ToolkitPage() {
             <div className="narrative-inner"><p>The most comprehensive <mark>DeFi terminal for AI agents</mark>. 102+ MCP tools covering wallets, spot trading, Smart Routing on multiple DEXes, perpetual futures, lending, yield farming, liquid staking, restaking, cross-chain swaps, bridges, market intelligence, prediction markets, analytics platforms, automated strategies, safety controls, DAO governance, persistent agent memory, Telegram notifications, and agent-to-agent coordination via A2A — all from <mark>a single URL</mark>.</p></div>
           </AccordionItem>
           <AccordionItem num="02" title="How do I connect my agent?">
-            <div className="narrative-inner"><p>Add our hosted MCP server URL to your agent's config. For Claude: <em>claude mcp add agnt --transport sse https://mcp.agntmpp.xyz/sse</em>. For Cursor/Windsurf: add <em>{`{"mcpServers":{"agnt":{"url":"https://mcp.agntmpp.xyz/sse"}}}`}</em> to your MCP config. <mark>One line, done</mark>.</p></div>
+            <div className="narrative-inner"><p>Create an API key or Claude connector URL from your AGNT dashboard, then add the hosted MCP endpoint to your agent config. Claude-style clients can use the connector URL directly; clients with header support should send <em>x-agnt-api-key</em>.</p></div>
           </AccordionItem>
           <AccordionItem num="03" title="Do I need to install anything?">
             <div className="narrative-inner"><p><mark>No</mark>. We host the MCP server. Just add the URL and your agent connects instantly. If you prefer self-hosting, you can clone the repo and run <mark>npx @agnt/mcp</mark> locally.</p></div>
@@ -102,7 +102,7 @@ export default function ToolkitPage() {
             <div className="narrative-inner"><p>Wallet keys are generated and encrypted with <mark>AES-256-GCM</mark> on the machine running your MCP server — whether that's your laptop or your own VPS. Keys <mark>never leave that machine</mark> and are never transmitted over the network. Every transaction is signed server-side by your agent's wallet.</p></div>
           </AccordionItem>
           <AccordionItem num="07" title="How does payment work?">
-            <div className="narrative-inner"><p><mark>Hackathon mode is free</mark>. Add the MCP server URL and use every available tool without registration, checkout, login, or an API key.</p></div>
+            <div className="narrative-inner"><p>Create an account, then use the Plans page to choose the access level you need. API keys and Claude connector URLs are generated from your dashboard and stay tied to your account.</p></div>
           </AccordionItem>
           <AccordionItem num="08" title="What is A2A?">
             <div className="narrative-inner"><p>A2A (Agent-to-Agent) is Google's open standard for <mark>agent coordination</mark>. ./AGNT publishes an Agent Card at <em>/.well-known/agent.json</em> so other agents can discover its DeFi capabilities and submit tasks. Combined with MCP (agent↔tools) and MPP (agent↔payments), ./AGNT is the first DeFi toolkit with the <mark>complete agentic protocol stack</mark>.</p></div>

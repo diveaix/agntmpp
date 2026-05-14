@@ -137,14 +137,23 @@ export function getAutomation(id: string): AutomationEntry | null {
   return store.automations.find((a) => a.id === id) || null
 }
 
-export function addAutomationHistory(id: string, result: string, success: boolean) {
+export function addAutomationHistory(
+  id: string,
+  result: string,
+  success: boolean,
+  options?: { countRun?: boolean; status?: AutomationEntry['status']; nextRun?: string | null },
+) {
   const store = loadAutomations()
   const auto = store.automations.find((a) => a.id === id)
   if (!auto) return
   auto.history.push({ time: new Date().toISOString(), result, success })
   auto.lastRun = new Date().toISOString()
-  auto.runCount++
-  if (auto.maxRuns > 0 && auto.runCount >= auto.maxRuns) {
+  const countRun = options?.countRun ?? true
+  if (countRun) auto.runCount++
+  if (options?.status) {
+    auto.status = options.status
+    auto.nextRun = options.nextRun ?? null
+  } else if (auto.maxRuns > 0 && auto.runCount >= auto.maxRuns) {
     auto.status = 'completed'
     auto.nextRun = null
   } else if (auto.intervalMs > 0) {

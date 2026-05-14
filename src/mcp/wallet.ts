@@ -22,6 +22,13 @@ export interface WalletStore {
   activeIndex: number
 }
 
+export interface WalletBackupPayload {
+  version: 1
+  exportedAt: string
+  wallets: WalletEntry[]
+  activeIndex: number
+}
+
 function resolveGlobalPath(custom?: string): string {
   const p = custom || process.env.AGNT_WALLET_PATH || '.agnt/wallets.enc'
   return isAbsolute(p) ? p : resolve(process.cwd(), p)
@@ -170,6 +177,90 @@ export function recoverLegacyWallet(nameOrAddress: string, legacyPath?: string):
   target.activeIndex = target.wallets.length - 1
   saveStore(target)
   return { wallet: copy, alreadyPresent: false }
+}
+
+function validateBackupPayload(payload: unknown): WalletBackupPayload {
+  const parsed = payload as Partial<WalletBackupPayload>
+  if (parsed.version !== 1) throw new Error('Unsupported wallet backup version.')
+  if (!Array.isArray(parsed.wallets)) throw new Error('Wallet backup is missing wallets.')
+  const wallets = parsed.wallets.map((wallet) => {
+    if (!wallet || typeof wallet !== 'object') throw new Error('Wallet backup contains an invalid wallet.')
+    const candidate = wallet as Partial<WalletEntry>
+    if (!candidate.name || !candidate.address || !candidate.privateKey || !candidate.createdAt) {
+      throw new Error('Wallet backup contains an incomplete wallet.')
+    }
+    if (!candidate.address.startsWith('0x') || !candidate.privateKey.startsWith('0x')) {
+      throw new Error('Wallet backup contains an invalid address or private key.')
+    }
+    const account = privateKeyToAccount(candidate.privateKey as `0x${string}`)
+    if (account.address.toLowerCase() !== candidate.address.toLowerCase()) {
+      throw new Error(`Wallet backup private key does not match address ${candidate.address}.`)
+    }
+    return {
+      name: String(candidate.name),
+      address: account.address,
+      privateKey: candidate.privateKey as `0x${string}`,
+      createdAt: String(candidate.createdAt),
+    }
+  })
+  return {
+    version: 1,
+    exportedAt: String(parsed.exportedAt || new Date().toISOString()),
+    wallets,
+    activeIndex: Number.isInteger(parsed.activeIndex) ? Math.max(0, Math.min(Number(parsed.activeIndex), Math.max(0, wallets.length - 1))) : 0,
+  }
+}
+
+/** Export the current scoped wallet vault as a password-encrypted portable backup string. */
+export function exportWalletBackup(password: string, custom?: string): { backup: string; walletCount: number; exportedAt: string } {
+  if (password.trim().length < 8) throw new Error('Backup password must be at least 8 characters.')
+  const store = loadStore(custom)
+  if (store.wallets.length === 0) throw new Error('No wallets to back up.')
+  const payload: WalletBackupPayload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    wallets: store.wallets,
+    activeIndex: store.activeIndex,
+  }
+  return {
+    backup: encrypt(JSON.stringify(payload), password),
+    walletCount: store.wallets.length,
+    exportedAt: payload.exportedAt,
+  }
+}
+
+/** Import a password-encrypted wallet backup into the current scoped vault. */
+export function importWalletBackup(backup: string, password: string, custom?: string): { imported: number; skipped: number; activeWallet: WalletEntry | null } {
+  if (password.trim().length < 8) throw new Error('Backup password must be at least 8 characters.')
+  const payload = validateBackupPayload(JSON.parse(decrypt(backup, password)))
+  const store = loadStore(custom)
+  let imported = 0
+  let skipped = 0
+  const firstImportedAddress = payload.wallets[payload.activeIndex]?.address
+
+  for (const wallet of payload.wallets) {
+    const exists = store.wallets.some((candidate) => candidate.address.toLowerCase() === wallet.address.toLowerCase())
+    if (exists) {
+      skipped += 1
+      continue
+    }
+    store.wallets.push(wallet)
+    imported += 1
+  }
+
+  if (firstImportedAddress) {
+    const importedActiveIndex = store.wallets.findIndex((wallet) => wallet.address.toLowerCase() === firstImportedAddress.toLowerCase())
+    if (importedActiveIndex >= 0) store.activeIndex = importedActiveIndex
+  } else if (store.activeIndex >= store.wallets.length) {
+    store.activeIndex = Math.max(0, store.wallets.length - 1)
+  }
+
+  saveStore(store, custom)
+  return {
+    imported,
+    skipped,
+    activeWallet: store.wallets[store.activeIndex] || null,
+  }
 }
 
 /** Get viem Account from a wallet entry. */

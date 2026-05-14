@@ -12,7 +12,7 @@ import { TEMPO_CHAIN, TOKENS } from './config.js'
 import { CHAIN_EIDS } from './config.js'
 import { ALL_TOOLS, handleTool, TOOL_COUNT } from './tools/index.js'
 import { SUPPORTED_CHAINS } from './chains.js'
-import { HACKATHON_DISABLED_MESSAGE } from '../hackathon-mode.js'
+import { formatBillingCatalog } from './billing-catalog.js'
 
 // ─── Server ──────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     }] }
   }
   if (req.params.uri === 'agnt://plans') {
-    return { contents: [{ uri: 'agnt://plans', mimeType: 'text/plain', text: HACKATHON_DISABLED_MESSAGE }] }
+    return { contents: [{ uri: 'agnt://plans', mimeType: 'text/plain', text: formatBillingCatalog() }] }
   }
   throw new Error(`Unknown resource: ${req.params.uri}`)
 })

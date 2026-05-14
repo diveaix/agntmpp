@@ -49,7 +49,7 @@ export default function LandingPage() {
                 <br />DON'T<br />
                 <span className="glitch-word" data-text="SLEEP">SLEEP</span>
               </h1>
-              <p className="sub">Multi-Chain DeFi Terminal for Autonomous AI Agents</p>
+
               {bootDone && (
                 <Link to="/toolkit" className="hero-cta">Access Toolkit →</Link>
               )}
@@ -80,7 +80,7 @@ export default function LandingPage() {
             <div className="flow-step"><div className="step-num">05</div><h3><mark>Remember & Learn</mark></h3><p>Your agent remembers past trades, strategies, and your preferences via persistent memory. Encrypted, searchable, always available.</p></div>
             <div className="flow-step"><div className="step-num">06</div><h3><mark>Agent-to-Agent</mark></h3><p>Other agents discover your ./AGNT via the A2A protocol — delegate tasks, coordinate strategies, build an agent network. The full agentic stack: MCP + MPP + A2A.</p></div>
             <div className="flow-step"><div className="step-num">07</div><h3><mark>Automate</mark></h3><p>Set up DCA strategies, price alerts with auto-execution, and copy-trading. Your agent trades while you sleep — no manual intervention needed.</p></div>
-            <div className="flow-step"><div className="step-num">08</div><h3><mark>Free During Hackathon</mark></h3><p>Connect the MCP server directly. Login, plans, checkout, and API keys are paused for the hackathon build.</p></div>
+            <div className="flow-step"><div className="step-num">08</div><h3><mark>Secure Access</mark></h3><p>Create an AGNT account, generate an API key or connector URL, and your wallets stay tied to that identity across sessions.</p></div>
           </div>
         </AccordionItem>
 
@@ -102,7 +102,22 @@ export default function LandingPage() {
         </AccordionItem>
 
         <AccordionItem num="004" title="Live Demo" id="s-terminal" onOpenChange={setLiveDemoOpen}>
-          <LiveDemoTerminal isOpen={liveDemoOpen} />
+          <div className="live-demo-split">
+            <div className="live-demo-info">
+              <h3><mark>Watch your agent execute live trades.</mark></h3>
+              <p>Natural language in. DeFi execution out. One MCP URL powers wallets, swaps, leverage, and automations.</p>
+              <div className="live-demo-capabilities">
+                <div className="live-demo-cap">Wallet creation</div>
+                <div className="live-demo-cap">Fee-transparent swaps</div>
+                <div className="live-demo-cap">50x perps on Hyperliquid</div>
+                <div className="live-demo-cap">Automated DCA</div>
+                <div className="live-demo-cap">Persistent memory</div>
+              </div>
+            </div>
+            <div className="live-demo-terminal-col">
+              <LiveDemoTerminal isOpen={liveDemoOpen} />
+            </div>
+          </div>
         </AccordionItem>
 
         <AccordionItem num="005" title="Manifesto" id="s-manifesto">

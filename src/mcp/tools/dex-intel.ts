@@ -5,17 +5,11 @@
  */
 
 import type { ToolModule } from './index.js'
-import { getOrCreateWallet, getAccount } from '../wallet.js'
-import { getPublicClient, getWalletClient as getChainsWalletClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
-import { parseUnits, formatUnits } from 'viem'
 import {
-  getNativeEthPlan,
   isNativeEthRequest as isExplicitNativeEthRequest,
   resolveToWeth as resolveNativeToWeth,
-  waitForTokenBalanceIncrease,
-  wethAbi as nativeWethAbi,
 } from './native-eth.js'
-import { buildTradeSafetyNotice } from './trade-safety.js'
+import bridgesModule from './bridges.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -216,7 +210,7 @@ const TOOLS = [
   },
   {
     name: 'smart_swap',
-    description: 'Intelligent swap: discovers the best pool via DexScreener, then executes the trade on that exact DEX. Supports Uniswap, PancakeSwap, Aerodrome, Velodrome.',
+    description: 'Intelligent swap: discovers likely liquidity via DexScreener, then executes through the hardened Jumper/LI.FI routed swap path with route safety checks.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -226,6 +220,8 @@ const TOOLS = [
         amount: { type: 'number', description: 'Amount to swap (in human units)' },
         chain: { type: 'string', description: 'Preferred chain (optional — auto-selects best if omitted)' },
         slippage: { type: 'number', description: 'Slippage tolerance in %. Default: 1' },
+        maxLossPercent: { type: 'number', description: 'Maximum allowed estimated value loss in %. Default 10, cannot be raised above 10.' },
+        nativeReserveEth: { type: 'string', description: 'ETH to keep for gas when amount is all/max for the native token. Default: 0.0005 ETH.' },
         feeTier: { type: 'number', description: 'Uniswap V3 fee tier. Default: 3000 (0.3%)' },
       },
       required: ['action', 'query'],
@@ -490,191 +486,24 @@ async function handle(name: string, args: Record<string, unknown>) {
           : best.baseToken.address)
         // Check if the output resolves to WETH — user probably wants native ETH
         const rawTokenOutForPlan = isExplicitNativeEthRequest(query) ? 'ETH' : rawTokenOut
-        const ethPlan = getNativeEthPlan(args.tokenIn as string, rawTokenOutForPlan, chainKey)
-        const { tokenIn, tokenOut } = ethPlan
-        const safetyNotice = await buildTradeSafetyNotice(chainKey, [args.tokenIn as string, rawTokenOut])
-
-        try {
-          const w = getOrCreateWallet()
-          const pub = getPublicClient(chainKey)
-          const wc = getChainsWalletClient(chainKey, w)
-          const account = getAccount(w)
-          const chainConfig = SUPPORTED_CHAINS[chainKey]
-
-          // Get decimals
-          const decimals = await pub.readContract({ address: tokenIn, abi: erc20Abi, functionName: 'decimals' }) as number
-          const amountIn = parseUnits(String(amount), decimals)
-          const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
-
-          if (ethPlan.directWrap) {
-            const hash = await wc.writeContract({
-              account, chain: chainConfig.chain,
-              address: ethPlan.weth,
-              abi: nativeWethAbi,
-              functionName: 'deposit',
-              args: [],
-              value: amountIn,
-            })
-            await pub.waitForTransactionReceipt({ hash })
-            recLines.push(
-              `\nSwap Executed!`,
-              `   From: ${amount} ETH`,
-              `   To: WETH`,
-              `   Chain: ${chainKey}`,
-              `   Wallet: ${w.name} (${w.address})`,
-              `   Tx: ${explorerTxUrl(chainKey, hash)}`,
-            )
-            return text(recLines.join('\n'))
-          }
-
-          if (ethPlan.directUnwrap) {
-            const balance = await pub.readContract({ address: tokenIn, abi: erc20Abi, functionName: 'balanceOf', args: [w.address] }) as bigint
-            if (balance < amountIn) return err(`Insufficient WETH balance. Need ${amount}, available ${formatUnits(balance, decimals)}.`)
-            const hash = await wc.writeContract({
-              account, chain: chainConfig.chain,
-              address: tokenIn,
-              abi: nativeWethAbi,
-              functionName: 'withdraw',
-              args: [amountIn],
-            })
-            await pub.waitForTransactionReceipt({ hash })
-            recLines.push(
-              `\nSwap Executed!`,
-              `   From: ${amount} WETH`,
-              `   To: ETH`,
-              `   Chain: ${chainKey}`,
-              `   Wallet: ${w.name} (${w.address})`,
-              `   Tx: ${explorerTxUrl(chainKey, hash)}`,
-            )
-            return text(recLines.join('\n'))
-          }
-
-          if (tokenIn.toLowerCase() === tokenOut.toLowerCase()) {
-            return err(`Input and output resolve to the same token (${tokenIn}). Choose two different assets for a swap.`)
-          }
-
-          if (ethPlan.wrapInput) {
-            const wrapTx = await wc.writeContract({
-              account, chain: chainConfig.chain,
-              address: ethPlan.weth,
-              abi: nativeWethAbi,
-              functionName: 'deposit',
-              args: [],
-              value: amountIn,
-            })
-            await pub.waitForTransactionReceipt({ hash: wrapTx })
-          }
-
-          const preUnwrapWethBalance = ethPlan.unwrapOutput
-            ? await pub.readContract({ address: tokenOut, abi: erc20Abi, functionName: 'balanceOf', args: [w.address] }) as bigint
-            : 0n
-
-          // Approve only this swap amount. If an older broader approval exists,
-          // replace it so the router cannot keep unused allowance.
-          const allowance = await pub.readContract({ address: tokenIn, abi: erc20Abi, functionName: 'allowance', args: [w.address, routerInfo.router.address] }) as bigint
-          if (allowance !== amountIn) {
-            if (allowance > 0n) {
-              const resetTx = await wc.writeContract({
-                account, chain: chainConfig.chain,
-                address: tokenIn, abi: erc20Abi, functionName: 'approve',
-                args: [routerInfo.router.address, 0n],
-              })
-              await pub.waitForTransactionReceipt({ hash: resetTx })
-            }
-            const approveTx = await wc.writeContract({
-              account, chain: chainConfig.chain,
-              address: tokenIn, abi: erc20Abi, functionName: 'approve',
-              args: [routerInfo.router.address, amountIn],
-            })
-            await pub.waitForTransactionReceipt({ hash: approveTx })
-          }
-
-          let hash: `0x${string}`
-
-          if (routerInfo.router.type === 'v3') {
-            const isRouter02 = SWAP_ROUTER_02_ADDRS.has(routerInfo.router.address.toLowerCase())
-            if (isRouter02) {
-              hash = await wc.writeContract({
-                account, chain: chainConfig.chain,
-                address: routerInfo.router.address,
-                abi: v3SwapRouter02Abi,
-                functionName: 'exactInputSingle',
-                args: [{
-                  tokenIn, tokenOut, fee: feeTier,
-                  recipient: w.address, amountIn,
-                  amountOutMinimum: 0n, sqrtPriceLimitX96: 0n,
-                }],
-              })
-            } else {
-              hash = await wc.writeContract({
-                account, chain: chainConfig.chain,
-                address: routerInfo.router.address,
-                abi: v3SwapAbi,
-                functionName: 'exactInputSingle',
-                args: [{
-                  tokenIn, tokenOut, fee: feeTier,
-                  recipient: w.address, deadline, amountIn,
-                  amountOutMinimum: 0n, sqrtPriceLimitX96: 0n,
-                }],
-              })
-            }
-          } else if (routerInfo.router.type === 'solidly') {
-            if (!routerInfo.router.factory) throw new Error(`${routerInfo.router.label} factory is not configured.`)
-            hash = await wc.writeContract({
-              account, chain: chainConfig.chain,
-              address: routerInfo.router.address,
-              abi: solidlySwapAbi,
-              functionName: 'swapExactTokensForTokens',
-              args: [amountIn, 0n, buildSolidlyRoutes(best, tokenIn, tokenOut, routerInfo.router.factory), w.address, deadline],
-            })
-          } else {
-            // V2 style with address[] path
-            hash = await wc.writeContract({
-              account, chain: chainConfig.chain,
-              address: routerInfo.router.address,
-              abi: v2SwapAbi,
-              functionName: 'swapExactTokensForTokens',
-              args: [amountIn, 0n, [tokenIn, tokenOut], w.address, deadline],
-            })
-          }
-
-          await pub.waitForTransactionReceipt({ hash })
-
-          // Convert router WETH output back to native ETH when ETH was requested.
-          if (ethPlan.unwrapOutput) {
-            const amountToUnwrap = await waitForTokenBalanceIncrease(pub, tokenOut, w.address, preUnwrapWethBalance)
-            if (amountToUnwrap > 0n) {
-              const unwrapHash = await wc.writeContract({
-                account, chain: chainConfig.chain,
-                address: tokenOut,
-                abi: nativeWethAbi,
-                functionName: 'withdraw',
-                args: [amountToUnwrap],
-              })
-              await pub.waitForTransactionReceipt({ hash: unwrapHash })
-            }
-          }
-
-          const explorer = explorerTxUrl(chainKey, hash)
-          const outSymbol = best.baseToken.address.toLowerCase() === tokenIn.toLowerCase() ? best.quoteToken.symbol : best.baseToken.symbol
-          const inputLabel = ethPlan.inputIsNative ? 'ETH' : `${tokenIn.slice(0, 10)}...`
-          const outputLabel = ethPlan.outputIsNative ? 'ETH' : outSymbol
-
-          recLines.push(
-            safetyNotice.trim() ? `\n${safetyNotice.trim()}` : '',
-            `\nSwap Executed!`,
-            `   From: ${amount} (${inputLabel})`,
-            `   To: ${outputLabel}`,
-            `   Chain: ${chainKey}`,
-            `   DEX: ${routerInfo.router.label}`,
-            `   Wallet: ${w.name} (${w.address})`,
-            `   Tx: ${explorer}`,
-          )
-
-          return text(recLines.join('\n'))
-        } catch (e) {
-          recLines.push(`\n❌ Execution failed: ${e instanceof Error ? e.message : String(e)}`)
-          return { content: [{ type: 'text' as const, text: recLines.join('\n') }], isError: true }
+        const routed = await bridgesModule.handle('jumper', {
+          action: 'swap',
+          fromChain: chainKey,
+          toChain: chainKey,
+          tokenIn: args.tokenIn,
+          tokenOut: rawTokenOutForPlan,
+          amount: String(amount),
+          slippage,
+          maxLossPercent: args.maxLossPercent,
+          nativeReserveEth: args.nativeReserveEth,
+        })
+        const routedText = routed?.content.map((part) => part.text).join('\n') || 'No routed result returned.'
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `${recLines.join('\n')}\n\nSafe routed execution through Jumper / LI.FI:\n\n${routedText}`,
+          }],
+          isError: routed?.isError,
         }
       }
 

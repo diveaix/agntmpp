@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { listActivityForUser, recordActivity, recordToolActivity } from '../activity-log.js'
 import type { AuthContext } from '../access-types.js'
+import { handleTool } from './index.js'
 
 function testPath(name: string): string {
   return `./.agnt/test-${name}-${Date.now()}-${Math.random().toString(16).slice(2)}.enc`
@@ -15,6 +16,29 @@ async function withActivityPath<T>(fn: () => Promise<T> | T): Promise<T> {
   } finally {
     if (previousPath === undefined) delete process.env.AGNT_ACTIVITY_LOG_PATH
     else process.env.AGNT_ACTIVITY_LOG_PATH = previousPath
+  }
+}
+
+async function withIsolatedWallets<T>(fn: () => Promise<T> | T): Promise<T> {
+  const previousWalletPath = process.env.AGNT_WALLET_PATH
+  const previousWalletDir = process.env.AGNT_WALLET_DIR
+  const previousVaultPath = process.env.AGNT_WALLET_VAULT_PATH
+  const previousVaultDir = process.env.AGNT_WALLET_VAULT_DIR
+  process.env.AGNT_WALLET_PATH = testPath('activity-wallets-root')
+  process.env.AGNT_WALLET_DIR = `./.agnt/test-activity-wallet-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  process.env.AGNT_WALLET_VAULT_PATH = testPath('activity-vault-root')
+  process.env.AGNT_WALLET_VAULT_DIR = `./.agnt/test-activity-vault-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  try {
+    return await fn()
+  } finally {
+    if (previousWalletPath === undefined) delete process.env.AGNT_WALLET_PATH
+    else process.env.AGNT_WALLET_PATH = previousWalletPath
+    if (previousWalletDir === undefined) delete process.env.AGNT_WALLET_DIR
+    else process.env.AGNT_WALLET_DIR = previousWalletDir
+    if (previousVaultPath === undefined) delete process.env.AGNT_WALLET_VAULT_PATH
+    else process.env.AGNT_WALLET_VAULT_PATH = previousVaultPath
+    if (previousVaultDir === undefined) delete process.env.AGNT_WALLET_VAULT_DIR
+    else process.env.AGNT_WALLET_VAULT_DIR = previousVaultDir
   }
 }
 
@@ -66,5 +90,33 @@ test('local dashboard can include unowned dev activity, hosted dashboard cannot'
 
     assert.equal(listActivityForUser('user_1').length, 0)
     assert.equal(listActivityForUser('user_1', { includeLocalUnowned: true }).length, 1)
+  })
+})
+
+test('records failed write tools for the authenticated dashboard user', async () => {
+  await withActivityPath(async () => {
+    await withIsolatedWallets(async () => {
+      const result = await handleTool('jumper', {
+        action: 'swap',
+        fromChain: 'base',
+        toChain: 'base',
+        tokenIn: 'USDC',
+        tokenOut: 'ETH',
+        amount: '1',
+      }, {
+        'org.paymentauth/credential': {
+          source: '0x1111111111111111111111111111111111111111',
+          payload: { hash: 'test' },
+        },
+      }, auth, 'activity-no-wallet')
+
+      assert.equal(result.isError, true)
+
+      const history = listActivityForUser('user_1')
+      assert.equal(history.length, 1)
+      assert.equal(history[0].tool, 'jumper')
+      assert.equal(history[0].success, false)
+      assert.match(history[0].result, /No active wallet is selected/)
+    })
   })
 })

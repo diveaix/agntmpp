@@ -30,6 +30,8 @@ export default function Nav() {
       <div className="nav-right">
         <Link to="/" className={`nav-cta${path === '/' ? ' nav-cta-active' : ' nav-cta-primary'}`}>Home</Link>
         <Link to="/toolkit" className={`nav-cta${path === '/toolkit' || path === '/presale' ? ' nav-cta-active' : ' nav-cta-primary'}`}>Toolkit</Link>
+        <Link to="/plans" className={`nav-cta${path === '/plans' ? ' nav-cta-active' : ' nav-cta-primary'}`}>Plans</Link>
+        <Link to="/dashboard" className={`nav-cta${path === '/dashboard' ? ' nav-cta-active' : ' nav-cta-primary'}`}>Dashboard</Link>
         <Link to="/docs" className={`nav-cta${path === '/docs' ? ' nav-cta-active' : ' nav-cta-primary'}`}>Docs</Link>
       </div>
     </nav>

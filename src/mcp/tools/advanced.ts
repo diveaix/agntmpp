@@ -5,11 +5,11 @@
  */
 
 import type { ToolModule } from './index.js'
-import { getActiveWallet, getOrCreateWallet, getAccount } from '../wallet.js'
+import { getOrCreateWallet, getAccount } from '../wallet.js'
 import { createAutomation, formatInterval, parseInterval } from '../scheduler.js'
-import { getWalletClient as getChainsWalletClient, getPublicClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
-import { callContract, ERC20_ABI, formatTxResult } from '../tx-executor.js'
-import { encodeFunctionData, formatUnits, parseUnits } from 'viem'
+import { callContract, formatTxResult } from '../tx-executor.js'
+import { parseUnits } from 'viem'
+import bridgesModule from './bridges.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -60,85 +60,17 @@ async function handle(name: string, args: Record<string, unknown>) {
     switch (args.action) {
       case 'swap_any_chain': {
         if (!args.chain || !args.tokenIn || !args.tokenOut || !args.amount) return err('Missing chain, tokenIn, tokenOut, or amount')
-        const w = getOrCreateWallet()
         const chain = (args.chain as string).toLowerCase()
-        const tokenIn = args.tokenIn as string
-        const tokenOut = args.tokenOut as string
-        const amount = args.amount as string
-        const slippage = (args.slippage as number) || 1
+        return bridgesModule.handle('jumper', {
+          action: 'swap',
+          fromChain: chain,
+          toChain: chain,
+          tokenIn: args.tokenIn,
+          tokenOut: args.tokenOut,
+          amount: args.amount,
+          slippage: args.slippage,
+        })
 
-        const chainIds: Record<string, number> = { ethereum: 1, arbitrum: 42161, base: 8453, optimism: 10, polygon: 137, avalanche: 43114 }
-        const chainId = chainIds[chain]
-        if (!chainId) return err(`Unsupported chain. Available: ${Object.keys(chainIds).join(', ')}`)
-
-        try {
-          // Use LiFi API for executable cross-chain swap
-          const quoteUrl = `https://li.quest/v1/quote?fromChain=${chainId}&toChain=${chainId}&fromToken=${tokenIn}&toToken=${tokenOut}&fromAmount=${amount}&fromAddress=${w.address}&slippage=${slippage / 100}`
-          const data = await fetchJson(quoteUrl) as {
-            transactionRequest?: { to: string; data: string; value: string }
-            estimate?: { toAmount: string; executionDuration: number; approvalAddress?: string }
-            action?: { fromToken: { symbol: string; decimals: number }; toToken: { symbol: string; decimals: number } }
-            tool?: string
-          }
-
-          if (!data.transactionRequest) return err('No executable route found. Try different tokens or amount.')
-
-          const wc = getChainsWalletClient(chain, w)
-          const pub = getPublicClient(chain)
-          if (tokenIn.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' && data.estimate?.approvalAddress) {
-            const token = tokenIn as `0x${string}`
-            const spender = data.estimate.approvalAddress as `0x${string}`
-            const amountIn = BigInt(amount)
-            const allowance = await pub.readContract({
-              address: token,
-              abi: ERC20_ABI,
-              functionName: 'allowance',
-              args: [w.address, spender],
-            }) as bigint
-            if (allowance !== amountIn) {
-              if (allowance > 0n) {
-                const resetHash = await wc.sendTransaction({
-                  account: getAccount(w),
-                  chain: SUPPORTED_CHAINS[chain].chain,
-                  to: token,
-                  data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [spender, 0n] }),
-                  value: 0n,
-                })
-                await pub.waitForTransactionReceipt({ hash: resetHash })
-              }
-              const approvalHash = await wc.sendTransaction({
-                account: getAccount(w),
-                chain: SUPPORTED_CHAINS[chain].chain,
-                to: token,
-                data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [spender, amountIn] }),
-                value: 0n,
-              })
-              await pub.waitForTransactionReceipt({ hash: approvalHash })
-            }
-          }
-          const hash = await wc.sendTransaction({
-            account: getAccount(w),
-            chain: SUPPORTED_CHAINS[chain].chain,
-            to: data.transactionRequest.to as `0x${string}`,
-            data: data.transactionRequest.data as `0x${string}`,
-            value: BigInt(data.transactionRequest.value || '0'),
-          })
-
-          const explorer = explorerTxUrl(chain, hash)
-          const outDecimals = data.action?.toToken?.decimals || 18
-          const formattedOut = data.estimate?.toAmount ? formatUnits(BigInt(data.estimate.toAmount), outDecimals) : '?'
-
-          return text(
-            `✅ Aggregator Swap Executed!\n\n` +
-            `Route: ${data.tool || 'Auto'}\n` +
-            `From: ${data.action?.fromToken?.symbol || tokenIn}\n` +
-            `To: ~${formattedOut} ${data.action?.toToken?.symbol || tokenOut}\n` +
-            `Chain: ${chain}\n` +
-            `Tx: ${explorer}`
-          )
-        } catch (e) {
-          return err(`Swap failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
       }
 
       case 'strategy': {

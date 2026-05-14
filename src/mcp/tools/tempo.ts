@@ -8,9 +8,10 @@ import { formatUnits, parseUnits, pad, stringToHex, createWalletClient, http } f
 import { tempo } from 'viem/chains'
 import { TEMPO_CHAIN, TOKENS, CONTRACTS, STARGATE, CHAIN_EIDS, DEFAULT_SLIPPAGE, DEX_FEE_BPS } from '../config.js'
 import { tip20Abi, dexAbi, stargateAbi, ammRouterAbi } from '../abis.js'
-import { createWallet, getActiveWallet, getOrCreateWallet, listWallets, switchWallet, renameWallet, deleteWallet, recoverLegacyWallet, getAccount, type WalletEntry } from '../wallet.js'
+import { createWallet, getActiveWallet, getOrCreateWallet, listWallets, switchWallet, renameWallet, deleteWallet, recoverLegacyWallet, exportWalletBackup, importWalletBackup, getAccount, type WalletEntry } from '../wallet.js'
 import { getPublicClient, SUPPORTED_CHAINS } from '../chains.js'
 import type { ToolModule } from './index.js'
+import { executeWalletSend } from './wallet-send.js'
 
 async function fetchJson(url: string, opts?: RequestInit): Promise<unknown> {
   const res = await fetch(url, opts)
@@ -122,27 +123,35 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        action: { type: 'string', enum: ['create', 'list', 'switch', 'rename', 'delete', 'recover_legacy', 'info', 'balance'], description: 'Action to perform' },
+        action: { type: 'string', enum: ['create', 'list', 'switch', 'rename', 'delete', 'recover_legacy', 'backup_export', 'backup_import', 'info', 'balance', 'send'], description: 'Action to perform' },
         name: { type: 'string', description: 'Wallet name (for create/switch)' },
         oldName: { type: 'string', description: 'Wallet old name (for rename)' },
         newName: { type: 'string', description: 'Wallet new name (for rename)' },
         token: { type: 'string', description: 'Token to check balance for' },
         address: { type: 'string', description: 'Address to check balance for' },
-        chain: { type: 'string', description: 'Chain to check balance on (e.g. base, ethereum, arbitrum). Default: tempo' },
+        to: { type: 'string', description: 'Recipient address (for send)' },
+        amount: { type: 'string', description: 'Amount to send (for send), or all/max for supported tokens' },
+        nativeReserveEth: { type: 'string', description: 'Native gas reserve for all/max native sends' },
+        backup: { type: 'string', description: 'Encrypted wallet backup string (for backup_import)' },
+        password: { type: 'string', description: 'Backup password for backup_export or backup_import' },
+        confirm: { type: 'boolean', description: 'Confirm dangerous actions like delete' },
+        chain: { type: 'string', description: 'Chain to check balance or send on (e.g. base, ethereum, arbitrum). Default: tempo' },
       },
       required: ['action'],
     },
   },
   {
     name: 'payment',
-    description: 'Send tokens or check tx status on Tempo',
+    description: 'Send tokens or check tx status. Tempo supports memo payments; other EVM chains use normal wallet transfers.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         action: { type: 'string', enum: ['send', 'status'], description: 'Action to perform' },
         to: { type: 'string', description: 'Recipient address (for send)' },
-        amount: { type: 'number', description: 'Amount to send' },
+        amount: { type: ['number', 'string'], description: 'Amount to send, or all/max on non-Tempo chains' },
         token: { type: 'string', description: 'Token symbol (Default: USDC.e)' },
+        chain: { type: 'string', description: 'Chain key. Default: tempo. Use base/arbitrum/optimism/polygon/etc. for generic transfers.' },
+        nativeReserveEth: { type: 'string', description: 'Native gas reserve for all/max native sends on non-Tempo chains' },
         memo: { type: 'string', description: 'Payment memo' },
         hash: { type: 'string', description: 'Tx hash (for status)' },
       },
@@ -234,9 +243,32 @@ async function handle(name: string, args: Record<string, unknown>) {
       }
       case 'delete': {
         if (!args.name) return err('Missing wallet name to delete')
+        if (args.confirm !== true) return err('Wallet deletion is permanent. Re-run with confirm=true after backing up the wallet.')
         const w = deleteWallet(args.name as string)
         if (!w) return err(`Wallet "${args.name}" not found.`)
         return text(`🗑️ Wallet "${w.name}" deleted.\nAddress: ${w.address}\n\n⚠️ If you didn't back up the private key, the funds in this wallet are unrecoverable.`)
+      }
+      case 'backup_export': {
+        if (!args.password || typeof args.password !== 'string') return err('Missing backup password. Use a strong password with at least 8 characters.')
+        const backup = exportWalletBackup(args.password)
+        return text(
+          `Wallet backup created\n` +
+          `Wallets: ${backup.walletCount}\n` +
+          `Exported: ${backup.exportedAt}\n\n` +
+          `Encrypted backup:\n${backup.backup}\n\n` +
+          `Keep this backup and password together only in a secure place. AGNT cannot restore it without the password.`
+        )
+      }
+      case 'backup_import': {
+        if (!args.backup || typeof args.backup !== 'string') return err('Missing encrypted backup string.')
+        if (!args.password || typeof args.password !== 'string') return err('Missing backup password.')
+        const result = importWalletBackup(args.backup, args.password)
+        return text(
+          `Wallet backup imported\n` +
+          `Imported: ${result.imported}\n` +
+          `Skipped existing: ${result.skipped}\n` +
+          `Active wallet: ${result.activeWallet ? `${result.activeWallet.name} (${result.activeWallet.address})` : 'none'}`
+        )
       }
       case 'recover_legacy': {
         if (!args.name) return err('Missing legacy wallet name or address to recover')
@@ -431,6 +463,16 @@ async function handle(name: string, args: Record<string, unknown>) {
         const b = await pub().readContract({ address: tok.address, abi: tip20Abi, functionName: 'balanceOf', args: [addr] }) as bigint
         return text(`${tok.symbol}: ${formatUnits(b, tok.decimals)}`)
       }
+      case 'send': {
+        const chain = ((args.chain as string | undefined) || 'tempo').toLowerCase()
+        if (chain === 'tempo') return err('Use payment action=send for Tempo payments. Use wallet_send or wallet action=send for Base, Arbitrum, Optimism, Polygon, and other EVM chains.')
+        return executeWalletSend({
+          ...args,
+          action: 'send',
+          chain,
+          token: args.token || 'ETH',
+        })
+      }
       default: return err(`Unknown wallet action: ${args.action}`)
     }
   }
@@ -438,6 +480,15 @@ async function handle(name: string, args: Record<string, unknown>) {
   if (name === 'payment') {
     switch (args.action) {
       case 'send': {
+        const chain = ((args.chain as string | undefined) || 'tempo').toLowerCase()
+        if (chain !== 'tempo') {
+          return executeWalletSend({
+            ...args,
+            action: 'send',
+            chain,
+            token: args.token || 'ETH',
+          })
+        }
         if (!args.to || args.amount === undefined) return err('Missing to or amount')
         const active = requireActiveWallet()
         if ('error' in active) return active.error
@@ -490,6 +541,14 @@ async function handle(name: string, args: Record<string, unknown>) {
         return text(`✅ Payment sent!\nAmount: ${amount} ${sym}\nTo: ${to}\n${memo ? `Memo: ${memo}\n` : ''}Gas: ~0.001 USD (sponsored)\nTx: ${TEMPO_CHAIN.explorer}/tx/${hash}`)
       }
       case 'status': {
+        const chain = ((args.chain as string | undefined) || 'tempo').toLowerCase()
+        if (chain !== 'tempo') {
+          return executeWalletSend({
+            action: 'status',
+            chain,
+            hash: args.hash,
+          })
+        }
         if (!args.hash) return err('Missing hash')
         const hash = args.hash as `0x${string}`
         try {

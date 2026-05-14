@@ -1,5 +1,4 @@
 import type { AuthContext } from '../access-types.js'
-import { HACKATHON_DISABLED_MESSAGE, HACKATHON_MODE } from '../../hackathon-mode.js'
 import {
   createApiKey,
   getCurrentSubscription,
@@ -14,14 +13,14 @@ const err = (e: string) => ({ content: [{ type: 'text' as const, text: `Error: $
 const TOOLS = [
   {
     name: 'account',
-    description: 'API key management for paid AGNT users. Free users do not register; they can add the MCP server directly.',
+    description: 'API key management for AGNT users. API keys and connector tokens keep wallets tied to the account across sessions.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         action: {
           type: 'string',
           enum: ['me', 'create_api_key', 'revoke_api_key'],
-          description: 'me shows current access; create_api_key creates another paid-user key; revoke_api_key disables one key.',
+          description: 'me shows current access; create_api_key creates another account key; revoke_api_key disables one key.',
         },
         label: { type: 'string', description: 'Label for an API key.' },
         id: { type: 'string', description: 'API key id for revoke_api_key.' },
@@ -43,26 +42,16 @@ function formatKeyLine(key: { id: string; prefix: string; label: string; created
 }
 
 function requireAuth(auth?: AuthContext): AuthContext | { error: string } {
-  if (!auth) return { error: 'API key required for account management. Free users do not need registration; paid API keys are issued from the website checkout page.' }
+  if (!auth) return { error: 'API key or connector token required for account management. Create access from the AGNT dashboard.' }
   return auth
 }
 
 async function handle(name: string, args: Record<string, unknown>, auth?: AuthContext) {
   if (name !== 'account') return null
 
-  if (HACKATHON_MODE) {
-    return text([
-      'AGNT account system is disabled for hackathon review.',
-      '',
-      HACKATHON_DISABLED_MESSAGE,
-      '',
-      'Use the MCP server directly. No API key, login, signup, or paid plan is required right now.',
-    ].join('\n'))
-  }
-
   switch (args.action) {
     case 'register':
-      return err('Free users do not need registration. Add the hosted MCP server directly. Pro and Ultra users buy on the website checkout page, then receive an API key after verified payment.')
+      return err('Use the AGNT dashboard to create an account, then generate API keys and connector URLs from there.')
 
     case 'me': {
       const checked = requireAuth(auth)

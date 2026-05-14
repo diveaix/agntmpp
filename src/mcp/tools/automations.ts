@@ -13,11 +13,15 @@ import {
   formatInterval,
   type AutomationEntry,
 } from '../scheduler.js'
-import { scheduleNewAutomation } from '../automation-runner.js'
-import { parseAutomationValidity, normalizeAutomationMode, type AutomationPlan, type HyperliquidInfoMetric } from '../automation-types.js'
+import { scheduleNewAutomation, unscheduleAutomation } from '../automation-runner.js'
+import { parseAutomationValidity, normalizeAutomationMode, type AutomationPlan, type EventAutomationAction, type HyperliquidInfoMetric } from '../automation-types.js'
+import { normalizeFastVerificationMode } from '../fast-event-types.js'
 import { canCreateDataAutomation, getPlanEntitlement } from '../automation-entitlements.js'
 import { checkEventAutomationIntake, checkHyperliquidMonitorIntake, formatMissingQuestions } from '../automation-intake.js'
 import type { AuthContext } from '../access-types.js'
+import { evaluateAutomationReadiness, type AutomationReadinessProbe } from './automation-readiness.js'
+import { getPolymarketSetupStatus } from './polymarket.js'
+import { getHyperliquidSetupStatus } from './hyperliquid.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -56,6 +60,7 @@ const TOOLS = [
         stopLossPercent: { type: 'number', description: 'Hyperliquid stop loss percent' },
         takeProfitPercent: { type: 'number', description: 'Hyperliquid take profit percent' },
         minConfidence: { type: 'number', description: 'Minimum Grok confidence. Default 0.8' },
+        verificationMode: { type: 'string', enum: ['speed', 'balanced', 'fortress'], description: 'Fast event verification mode. speed = fastest trusted-source path, balanced = default, fortress = stricter quorum.' },
         validFor: { type: 'string', description: 'Required validity window, like "10m", "6h", "7d", or "1mo"' },
         mode: { type: 'string', enum: ['notify_only', 'ask_first', 'auto_execute', 'emergency_paused'], description: 'Execution mode' },
         metric: { type: 'string', description: 'Hyperliquid info metric for create_hl_monitor' },
@@ -112,6 +117,31 @@ function ownerFields(auth: AuthContext | undefined, plan: string) {
   return auth
     ? { userId: auth.userId, createdByApiKeyId: auth.apiKeyId, planAtCreation }
     : {}
+}
+
+async function defaultAutomationReadinessProbe(action: EventAutomationAction) {
+  try {
+    if (action.protocol === 'polymarket') {
+      return evaluateAutomationReadiness(action, {
+        polymarket: await getPolymarketSetupStatus(action.maxSpend),
+      })
+    }
+
+    return evaluateAutomationReadiness(action, {
+      hyperliquid: await getHyperliquidSetupStatus(action.amountUsd),
+    })
+  } catch (e) {
+    return {
+      allowed: false,
+      message: `I could not verify ${action.protocol} setup, so I did not create the live trading automation.\n\nReason: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
+}
+
+let automationReadinessProbe: AutomationReadinessProbe = defaultAutomationReadinessProbe
+
+export function setAutomationReadinessProbeForTests(probe: AutomationReadinessProbe | null) {
+  automationReadinessProbe = probe || defaultAutomationReadinessProbe
 }
 
 // ─── Handlers ────────────────────────────────────────────
@@ -194,6 +224,7 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
 
       case 'create_event': {
         if (!args.protocol) return err('Missing protocol')
+        if (args.protocol !== 'polymarket' && args.protocol !== 'hyperliquid') return err('protocol must be polymarket or hyperliquid')
         const intake = checkEventAutomationIntake(args)
         if (!intake.ok) return err(formatMissingQuestions(intake))
         const plan = resolvePlan(args, auth)
@@ -208,6 +239,7 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
         if (!entitlement.allowed) return err(entitlement.reason)
         const planDetails = auth?.entitlement || getPlanEntitlement(plan)
         if (mode === 'auto_execute' && !planDetails.autoExecuteAllowed) return err(`${planDetails.plan} plan does not allow auto-execute data automations.`)
+        const verificationMode = normalizeFastVerificationMode(args.verificationMode || process.env.AGNT_FAST_VERIFY_DEFAULT_MODE)
 
         const trigger = {
           topic: args.topic as string,
@@ -217,7 +249,7 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
           minConfidence: (args.minConfidence as number | undefined) ?? 0.8,
         }
 
-        const action = args.protocol === 'polymarket'
+        const action: EventAutomationAction = args.protocol === 'polymarket'
           ? {
               protocol: 'polymarket' as const,
               marketId: args.marketId as string,
@@ -239,11 +271,26 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
         if (action.protocol === 'polymarket' && (!action.marketId || !action.maxSpend)) return err('Polymarket event automations need marketId and maxSpend')
         if (action.protocol === 'hyperliquid' && action.amountUsd <= 0) return err('Hyperliquid event automations need amountUsd')
 
+        const readiness = await automationReadinessProbe(action)
+        if (!readiness.allowed) return err(readiness.message || `${action.protocol} setup is not ready for live automations.`)
+        const readinessReason = readiness.message || 'Account setup, balances, approvals, and market checks passed.'
+
         const automation = createAutomation({
           type: 'event_trigger',
           name: (args.name as string | undefined) || `Event: ${trigger.topic}`,
           ...ownerFields(auth, plan),
-          params: { trigger, action, policy: {}, mode, plan, validFor: validity.validFor, validUntil: validity.validUntil },
+          params: {
+            trigger,
+            action,
+            policy: {},
+            mode,
+            plan,
+            verificationMode,
+            actionReady: true,
+            readinessReason,
+            validFor: validity.validFor,
+            validUntil: validity.validUntil,
+          },
           intervalMs: 0,
           maxRuns: 0,
           status: 'active',
@@ -256,6 +303,7 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
           `Topic: ${trigger.topic}\n` +
           `Action: ${action.protocol}\n` +
           `Mode: ${mode}\n\n` +
+          `Verification: ${verificationMode}\n` +
           `Valid For: ${validity.validFor}\n` +
           `Expires: ${validity.validUntil.slice(0, 16).replace('T', ' ')} UTC\n\n` +
           `Grok verification only confirms whether the tweet satisfies this automation. No X search is required on the fast path.\n` +
@@ -351,6 +399,7 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
         if (auth && (!candidate || candidate.userId !== auth.userId)) return err(`Automation "${id}" not found.`)
         const auto = cancelAutomation(id)
         if (!auto) return err(`Automation "${id}" not found.`)
+        unscheduleAutomation(auto.id)
         return text(`✅ Automation cancelled.\n\nID: ${auto.id}\nName: ${auto.name}\nRuns completed: ${auto.runCount}`)
       }
 

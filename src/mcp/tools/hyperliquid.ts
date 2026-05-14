@@ -51,7 +51,7 @@ function resolveAssetIndex(universe: { name: string }[], symbol: string): number
   return idx
 }
 
-async function getHyperliquidSetupStatus(): Promise<HyperliquidSetupStatus> {
+export async function getHyperliquidSetupStatus(requiredMargin?: number): Promise<HyperliquidSetupStatus> {
   const w = getActiveWallet()
   if (!w) return { hasWallet: false }
 
@@ -69,6 +69,7 @@ async function getHyperliquidSetupStatus(): Promise<HyperliquidSetupStatus> {
       address: w.address,
       accountValue,
       availableMargin: accountValue - marginUsed,
+      requiredMargin,
       openPositions,
     }
   } catch {
@@ -78,6 +79,7 @@ async function getHyperliquidSetupStatus(): Promise<HyperliquidSetupStatus> {
       address: w.address,
       accountValue: 0,
       availableMargin: 0,
+      requiredMargin,
       openPositions: 0,
     }
   }

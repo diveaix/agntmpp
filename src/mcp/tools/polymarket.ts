@@ -201,7 +201,7 @@ async function getReadiness() {
   }
 }
 
-async function getSetupStatus(requiredPusd?: number): Promise<PolymarketSetupStatus> {
+export async function getPolymarketSetupStatus(requiredPusd?: number): Promise<PolymarketSetupStatus> {
   try {
     const readiness = await getReadiness()
     return {
@@ -222,7 +222,7 @@ async function getSetupStatus(requiredPusd?: number): Promise<PolymarketSetupSta
 }
 
 async function getSetupGuideIfBlocked(action: string, requiredPusd?: number): Promise<string | null> {
-  const status = await getSetupStatus(requiredPusd)
+  const status = await getPolymarketSetupStatus(requiredPusd)
   const blocker = getPolymarketSetupBlocker(action, status)
   if (!blocker) return null
   return formatPolymarketSetupGuide(status, blocker)
@@ -317,7 +317,7 @@ async function handle(name: string, args: Record<string, unknown>) {
       case 'search': {
         if (!args.query) return err('Provide a search query')
         if (isPolymarketSetupGuideQuery(args.query)) {
-          const status = await getSetupStatus()
+          const status = await getPolymarketSetupStatus()
           const blocker = getPolymarketSetupBlocker('approve', status)
           return text(formatPolymarketSetupGuide(status, blocker))
         }
@@ -384,7 +384,7 @@ async function handle(name: string, args: Record<string, unknown>) {
       case 'setup':
       case 'guide':
       case 'help': {
-        const status = await getSetupStatus()
+        const status = await getPolymarketSetupStatus()
         const blocker = getPolymarketSetupBlocker('approve', status)
         return text(formatPolymarketSetupGuide(status, blocker))
       }

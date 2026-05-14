@@ -326,7 +326,7 @@ export default function DocsPage() {
               <div className="d-callout d-reveal">
                 <div className="d-callout-inner">
                   <strong>Quick Start</strong>
-                  <p>Hackathon mode is open: add the MCP server URL and start instantly. Login, plans, checkout, and API keys are paused for this submission.</p>
+                  <p>Create an AGNT account, generate an API key or connector URL from the dashboard, then add the MCP endpoint to your agent.</p>
                 </div>
               </div>
             )}
@@ -335,7 +335,7 @@ export default function DocsPage() {
             {!q && (
               <section className="d-section d-reveal" id="connection">
                 <h2>Connection</h2>
-                <p>Add one of these to your agent's MCP config — pick your client, paste, and go.</p>
+                <p>Add one of these to your agent's MCP config after creating an API key or connector URL.</p>
 
                 <div className="d-callout">
                   <div className="d-callout-inner">
@@ -345,13 +345,13 @@ export default function DocsPage() {
                 </div>
 
                 <CodeBlock label="Claude Code">
-                  {`claude mcp add agnt --transport sse https://mcp.agntmpp.xyz/sse`}
+                  {`claude mcp add agnt --transport sse "https://mcp.agntmpp.xyz/sse?agnt_connector_token=<your connector token>"`}
                 </CodeBlock>
                 <CodeBlock label="Cursor / Windsurf / Amp">
 {`{
   "mcpServers": {
     "agnt": {
-      "url": "https://mcp.agntmpp.xyz/sse"
+      "url": "https://mcp.agntmpp.xyz/sse?agnt_connector_token=<your connector token>"
     }
   }
 }`}

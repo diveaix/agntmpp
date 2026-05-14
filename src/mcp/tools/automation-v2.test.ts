@@ -10,15 +10,19 @@ import {
 import { addAutomationHistory, createAutomation, loadAutomations, updateAutomationStatusForUser } from '../scheduler.js'
 import { buildTopicRule, prefilterTweet } from '../automation-tags.js'
 import { deriveSourceState } from '../automation-source-manager.js'
-import { MockGrokVerifier } from '../automation-verifier.js'
+import { MockGrokVerifier, XaiGrokVerifier, normalizeGrokVerificationJson } from '../automation-verifier.js'
 import { buildUniversalEventFromVerification, matchEventAutomations } from '../automation-matcher.js'
 import { evaluateAutomationPolicy } from '../automation-policy.js'
 import { simulateAutomationAction, simulateHyperliquidInfoMonitor } from '../automation-simulators.js'
 import { canCreateDataAutomation, getPlanEntitlement } from '../automation-entitlements.js'
 import automationsModule from './automations.js'
+import { setAutomationReadinessProbeForTests } from './automations.js'
 import { TwitterApiIoClient } from '../twitterapi-client.js'
 import { processIncomingTweet } from '../twitter-ingestion-worker.js'
 import { checkEventAutomationIntake, formatMissingQuestions } from '../automation-intake.js'
+import { compileEventAutomation } from '../fast-event-compiler.js'
+import { EventHotCache } from '../event-hot-cache.js'
+import { buildEventHotCacheFromAutomations } from '../automation-runner.js'
 
 test('normalizes automation execution modes', () => {
   assert.equal(normalizeAutomationMode(undefined), 'notify_only')
@@ -169,6 +173,45 @@ test('resuming a paused DCA restores the next run when executions remain', () =>
     assert.equal(resumed?.runCount, 3)
     assert.ok(resumed?.nextRun)
     assert.ok(new Date(resumed.nextRun).getTime() > Date.now())
+  } finally {
+    if (previousPath === undefined) delete process.env.AGNT_AUTOMATIONS_PATH
+    else process.env.AGNT_AUTOMATIONS_PATH = previousPath
+  }
+})
+
+test('skipped automation history does not consume remaining DCA runs', () => {
+  const previousPath = process.env.AGNT_AUTOMATIONS_PATH
+  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-skipped-dca-${Date.now()}.enc`
+  try {
+    const auto = createAutomation({
+      type: 'dca',
+      name: 'Retry-safe DCA',
+      userId: 'usr_skipped_dca',
+      params: { tokenIn: 'pathUSD', tokenOut: 'USDC.e', amount: 0.1 },
+      intervalMs: 20_000,
+      maxRuns: 4,
+      status: 'active',
+    })
+
+    addAutomationHistory(auto.id, 'run 1', true)
+    addAutomationHistory(auto.id, 'run 2', true)
+    addAutomationHistory(auto.id, 'run 3', true)
+    addAutomationHistory(auto.id, 'Skipped: access paused', false, { countRun: false, status: 'paused', nextRun: null })
+
+    const paused = loadAutomations().automations.find((a) => a.id === auto.id)
+    assert.equal(paused?.runCount, 3)
+    assert.equal(paused?.status, 'paused')
+    assert.equal(paused?.nextRun, null)
+
+    const resumed = updateAutomationStatusForUser(auto.id, 'usr_skipped_dca', 'active')
+    assert.equal(resumed?.status, 'active')
+    assert.equal(resumed?.runCount, 3)
+    assert.ok(resumed?.nextRun)
+
+    addAutomationHistory(auto.id, 'run 4', true)
+    const completed = loadAutomations().automations.find((a) => a.id === auto.id)
+    assert.equal(completed?.runCount, 4)
+    assert.equal(completed?.status, 'completed')
   } finally {
     if (previousPath === undefined) delete process.env.AGNT_AUTOMATIONS_PATH
     else process.env.AGNT_AUTOMATIONS_PATH = previousPath
@@ -400,26 +443,64 @@ test('complex event automation intake lists missing setup questions', () => {
 
 test('automations tool creates event trigger automation in plain English output', async () => {
   process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-tool-event-${Date.now()}.enc`
-  const result = await automationsModule.handle('automations', {
-    action: 'create_event',
-    plan: 'free',
-    topic: 'iran_israel_conflict',
-    eventType: 'military_attack',
-    actor: 'Iran',
-    target: 'Israel',
-    protocol: 'polymarket',
-    marketId: 'm1',
-    side: 'YES',
-    maxSpend: 10,
-    maxPrice: 0.65,
-    validFor: '1h',
-    mode: 'notify_only',
-  })
+  setAutomationReadinessProbeForTests(async () => ({ allowed: true }))
+  try {
+    const result = await automationsModule.handle('automations', {
+      action: 'create_event',
+      plan: 'free',
+      topic: 'iran_israel_conflict',
+      eventType: 'military_attack',
+      actor: 'Iran',
+      target: 'Israel',
+      protocol: 'polymarket',
+      marketId: 'm1',
+      side: 'YES',
+      maxSpend: 10,
+      maxPrice: 0.65,
+      validFor: '1h',
+      mode: 'notify_only',
+    })
 
-  const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
-  assert.match(output, /Event Automation Created/i)
-  assert.match(output, /Grok verification/i)
-  assert.match(output, /Plan: free/i)
+    const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
+    assert.match(output, /Event Automation Created/i)
+    assert.match(output, /Grok verification/i)
+    assert.match(output, /Plan: free/i)
+  } finally {
+    setAutomationReadinessProbeForTests(null)
+  }
+})
+
+test('automations tool refuses Polymarket event automation when setup is not ready', async () => {
+  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-tool-event-not-ready-${Date.now()}.enc`
+  setAutomationReadinessProbeForTests(async () => ({
+    allowed: false,
+    message: 'Polymarket setup is not ready. Add Polygon USDC and approvals first.',
+  }))
+
+  try {
+    const result = await automationsModule.handle('automations', {
+      action: 'create_event',
+      plan: 'pro',
+      topic: 'iran_israel_conflict',
+      eventType: 'military_attack',
+      actor: 'Iran',
+      target: 'Israel',
+      protocol: 'polymarket',
+      marketId: 'm1',
+      side: 'YES',
+      maxSpend: 10,
+      maxPrice: 0.65,
+      validFor: '1h',
+      mode: 'notify_only',
+    })
+
+    const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
+    assert.equal(result?.isError, true)
+    assert.match(output, /Polymarket setup is not ready/i)
+    assert.equal(loadAutomations(process.env.AGNT_AUTOMATIONS_PATH).automations.length, 0)
+  } finally {
+    setAutomationReadinessProbeForTests(null)
+  }
 })
 
 test('automations tool creates Hyperliquid information monitor', async () => {
@@ -443,6 +524,75 @@ test('automations tool creates Hyperliquid information monitor', async () => {
 test('twitterapi client stays disabled without API key', () => {
   const client = new TwitterApiIoClient({ apiKey: undefined })
   assert.equal(client.isEnabled(), false)
+})
+
+test('twitterapi client fetches, normalizes, and dedupes recent tweets', async () => {
+  let calls = 0
+  const client = new TwitterApiIoClient({
+    apiKey: 'test',
+    baseUrl: 'https://api.twitterapi.io',
+    tweetsPerSource: 2,
+    fetchImpl: async (url) => {
+      calls += 1
+      assert.match(String(url), /\/twitter\/user\/last_tweets/)
+      return new Response(JSON.stringify({
+        tweets: [
+          { id: '1', text: 'Older tweet', userName: 'Reuters', createdAt: '2026-05-14T00:00:01.000Z' },
+          { id: '2', text: 'Iran launched missiles toward Israel', userName: 'Reuters', createdAt: '2026-05-14T00:00:02.000Z' },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    },
+  })
+
+  const seen: string[] = []
+  const source = { handle: 'Reuters', enabled: true, topics: ['iran_israel_conflict'], trustScore: 0.95 }
+  await client.pollOnce((tweet) => { seen.push(tweet.id) }, [source])
+  await client.pollOnce((tweet) => { seen.push(tweet.id) }, [source])
+
+  assert.deepEqual(seen, ['1', '2'])
+  assert.equal(calls, 2)
+})
+
+test('xAI Grok verifier parses strict JSON responses', async () => {
+  const verifier = new XaiGrokVerifier({
+    apiKey: 'xai-test',
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            event_happened: true,
+            matches_trigger: true,
+            matches_automation: true,
+            needs_external_search: false,
+            is_rumor: false,
+            is_old_news: false,
+            is_opinion_or_prediction: false,
+            actor: 'Iran',
+            target: 'Israel',
+            event_type: 'military_attack',
+            confidence: 0.91,
+            reason: 'The tweet says the event happened.',
+          }),
+        },
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  })
+
+  const result = await verifier.verify({
+    tweet: { id: 'grok1', text: 'Iran launched missiles toward Israel', authorHandle: 'Reuters', createdAt: new Date().toISOString() },
+    prefilter: { shouldVerify: true, candidateTopics: ['iran_israel_conflict'], matchedKeywords: ['iran'], matchedEntities: ['Israel'], sourceTrust: 0.95 },
+    trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel' },
+  })
+
+  assert.equal(result.matches_trigger, true)
+  assert.equal(result.confidence, 0.91)
+})
+
+test('grok verification JSON rejects missing confidence', () => {
+  assert.throws(
+    () => normalizeGrokVerificationJson({ event_happened: true, matches_trigger: true }, { topic: 'iran_israel_conflict' }),
+    /missing numeric confidence/i,
+  )
 })
 
 test('tweet ingestion verifies and matches event automations', async () => {
@@ -474,6 +624,147 @@ test('tweet ingestion verifies and matches event automations', async () => {
 
   assert.equal(result.verified, true)
   assert.equal(result.matchedAutomationIds.includes('auto1'), true)
+  assert.equal(result.dispatches.length, 0)
+  assert.equal(result.latency.totalMs >= 0, true)
+})
+
+test('tweet ingestion uses fast verifier before Grok for clear trusted events', async () => {
+  const rule = compileEventAutomation({
+    automationId: 'auto_fast_1',
+    topic: 'iran_israel_conflict',
+    triggerText: 'buy YES if Iran attacks Israel',
+    sourceHandles: ['sentdefender'],
+    sourceTiers: { sentdefender: 0.95 },
+    verificationMode: 'speed',
+    actionReady: true,
+    createdAt: 1_700_000_000_000,
+  })
+  const hotCache = new EventHotCache()
+  hotCache.rebuild([rule])
+  let grokCalled = false
+
+  const result = await processIncomingTweet({
+    tweet: {
+      id: 'tweet_fast_1',
+      authorHandle: 'sentdefender',
+      text: 'Iran launched missiles toward Israel.',
+      createdAt: new Date(1_700_000_000_000).toISOString(),
+    },
+    automations: [{
+      id: 'auto_fast_1',
+      type: 'event_trigger',
+      name: 'Buy YES',
+      params: {
+        trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
+        action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
+        policy: {},
+        mode: 'notify_only',
+        validFor: '1h',
+        validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      },
+      intervalMs: 0,
+      maxRuns: 1,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      lastRun: null,
+      nextRun: null,
+      runCount: 0,
+      history: [],
+    }],
+    verifier: {
+      verify: async () => {
+        grokCalled = true
+        return {
+          event_happened: true,
+          matches_trigger: true,
+          matches_automation: true,
+          needs_external_search: false,
+          is_rumor: false,
+          is_old_news: false,
+          is_opinion_or_prediction: false,
+          event_type: 'military_attack',
+          confidence: 0.9,
+          reason: 'grok confirmation',
+        }
+      },
+    },
+    hotCache,
+    dispatch: false,
+    now: 1_700_000_000_010,
+  })
+
+  assert.equal(result.verified, true)
+  assert.equal(result.fastPath, true)
+  assert.equal(result.matchedAutomationIds.includes('auto_fast_1'), true)
+  assert.equal(grokCalled, false)
+  assert.equal(Number.isFinite(result.latency.verifyMs), true)
+})
+
+test('runner builds hot cache from active event automations', () => {
+  const cache = buildEventHotCacheFromAutomations([{
+    id: 'auto_runner_1',
+    type: 'event_trigger',
+    name: 'Buy YES',
+    params: {
+      trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
+      action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
+      policy: {},
+      mode: 'notify_only',
+      verificationMode: 'speed',
+      actionReady: true,
+      validFor: '1h',
+      validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    },
+    intervalMs: 0,
+    maxRuns: 1,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    lastRun: null,
+    nextRun: null,
+    runCount: 0,
+    history: [],
+  }])
+
+  assert.deepEqual(cache.rulesForSource('Reuters').map((rule) => rule.automationId), ['auto_runner_1'])
+})
+
+test('tweet ingestion dispatches notify-only event automations and records latency', async () => {
+  const previousPath = process.env.AGNT_AUTOMATIONS_PATH
+  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-event-dispatch-${Date.now()}-${Math.random().toString(16).slice(2)}.enc`
+  try {
+    const automation = createAutomation({
+      type: 'event_trigger',
+      name: 'Notify event',
+      params: {
+        trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
+        action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
+        policy: {},
+        mode: 'notify_only',
+        validFor: '1h',
+        validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      },
+      intervalMs: 0,
+      maxRuns: 1,
+      status: 'active',
+    })
+
+    const result = await processIncomingTweet({
+      tweet: { id: 'tw-dispatch', text: 'Iran launched missiles toward Israel, officials say', authorHandle: 'Reuters', createdAt: new Date().toISOString() },
+      automations: [automation],
+      verifier: new MockGrokVerifier(),
+      dispatch: true,
+    })
+
+    assert.equal(result.dispatches.length, 1)
+    assert.equal(result.dispatches[0].submitted, false)
+    assert.equal(result.latency.dispatchMs >= 0, true)
+    const saved = loadAutomations().automations.find((item) => item.id === automation.id)
+    assert.equal(saved?.status, 'completed')
+    assert.match(saved?.history[0]?.result || '', /Verified event matched/)
+  } finally {
+    if (previousPath === undefined) delete process.env.AGNT_AUTOMATIONS_PATH
+    else process.env.AGNT_AUTOMATIONS_PATH = previousPath
+  }
 })
 
 test('automations tool refuses event automation without validity window', async () => {

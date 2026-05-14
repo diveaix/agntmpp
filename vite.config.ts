@@ -26,7 +26,7 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
-      '^/dashboard/(me|api-keys|connector-links|automations|history|sources|wallets)': {
+      '^/dashboard/(snapshot|me|api-keys|connector-links|automations|history|sources|wallets)': {
         target: 'http://localhost:3001',
         changeOrigin: true,
       },

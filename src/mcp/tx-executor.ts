@@ -9,6 +9,7 @@ import { encodeFunctionData, parseUnits, formatUnits, type Abi, type Address } f
 import { getOrCreateWallet, getAccount, type WalletEntry } from './wallet.js'
 import { getPublicClient, getWalletClient, explorerTxUrl } from './chains.js'
 import { checkSpend, recordSpend } from './spending-guard.js'
+import { planExactApproval } from './tools/approval-policy.js'
 
 // ─── ERC-20 ABI (approve + balanceOf + allowance) ────────
 
@@ -124,13 +125,14 @@ export async function ensureApproval(
     address: token, abi: ERC20_ABI, functionName: 'allowance', args: [w.address, spender],
   }) as bigint
 
-  if (allowance === amount) return null // already approved for exactly this call
+  const plan = planExactApproval(allowance, amount)
+  if (plan.alreadyExact) return null // already approved for exactly this call
 
-  if (allowance > 0n) {
+  if (plan.resetAmount !== null) {
     await callContract(chain, token, ERC20_ABI, 'approve', [spender, 0n])
   }
 
-  const tx = await callContract(chain, token, ERC20_ABI, 'approve', [spender, amount])
+  const tx = await callContract(chain, token, ERC20_ABI, 'approve', [spender, plan.approveAmount!])
   return tx.hash
 }
 

@@ -11,6 +11,7 @@ import { decodeFunctionData, encodeFunctionData, formatUnits } from 'viem'
 import { buildTradeSafetyNotice } from './trade-safety.js'
 import { assessRouteUsdValues, assessRouteValue } from './route-safety.js'
 import { assertNativeBalanceCoversTx, isNativeToken, knownTokenDecimals, resolveRouteAmount, resolveTokenAddress } from './aggregator-assets.js'
+import { planExactApproval } from './approval-policy.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -61,10 +62,11 @@ async function approveExactIfNeeded(input: {
     args: [input.owner, input.spender],
   }) as bigint
 
-  if (current === input.amount) return []
+  const plan = planExactApproval(current, input.amount)
+  if (plan.alreadyExact) return []
 
   const hashes: `0x${string}`[] = []
-  if (current > 0n) {
+  if (plan.resetAmount !== null) {
     const resetData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [input.spender, 0n] })
     await assertNativeBalanceCoversTx({ client: input.pub, account: input.owner, to: input.token, data: resetData, value: 0n, chain: input.chain })
     const resetHash = await input.wc.sendTransaction({
@@ -78,7 +80,7 @@ async function approveExactIfNeeded(input: {
     hashes.push(resetHash as `0x${string}`)
   }
 
-  const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [input.spender, input.amount] })
+  const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [input.spender, plan.approveAmount!] })
   await assertNativeBalanceCoversTx({ client: input.pub, account: input.owner, to: input.token, data: approveData, value: 0n, chain: input.chain })
   const approveHash = await input.wc.sendTransaction({
     account: input.wallet,
@@ -105,6 +107,12 @@ function decodeApproval(data: string): { spender: `0x${string}`; amount: bigint 
 
 // ─── Tool Definitions ────────────────────────────────────
 
+function approvalSummary(chain: string, hashes: `0x${string}`[]): string {
+  if (!hashes.length) return ''
+  const lines = hashes.map((hash) => `- ${explorerTxUrl(chain, hash)}`).join('\n')
+  return `\nApproval transaction${hashes.length === 1 ? '' : 's'}:\n${lines}\n`
+}
+
 const TOOLS = [
   {
     name: 'jumper',
@@ -117,7 +125,8 @@ const TOOLS = [
         toChain: { type: 'string', description: 'Destination chain. Use hyperliquid for Hyperliquid USDC (Perps).' },
         tokenIn: { type: 'string', description: 'Input token address' },
         tokenOut: { type: 'string', description: 'Output token address. For Hyperliquid USDC (Perps), this defaults to the LI.FI Hyperliquid USDC token.' },
-        amount: { type: 'string', description: 'Human-readable amount, or all/max for ERC-20 tokens' },
+        amount: { type: 'string', description: 'Human-readable amount, or all/max. For native ETH all/max, gas is reserved automatically.' },
+        nativeReserveEth: { type: 'string', description: 'ETH to keep for gas when amount is all/max for the native token. Default: 0.0005 ETH.' },
         slippage: { type: 'number', description: 'Slippage %. Default: 1' },
         maxLossPercent: { type: 'number', description: 'Maximum allowed estimated value loss in %. Default 10, cannot be raised above 10.' },
         toAddress: { type: 'string', description: 'Destination address (defaults to sender)' },
@@ -136,7 +145,8 @@ const TOOLS = [
         toChain: { type: 'string', description: 'Destination chain' },
         token: { type: 'string', description: 'Token address on source chain (use 0x0000000000000000000000000000000000000000 for the native gas token)' },
         toToken: { type: 'string', description: 'Token address on destination chain. Defaults to same as token.' },
-        amount: { type: 'string', description: 'Amount in human-readable units (e.g. "10" for 10 USDC). Converted to wei internally.' },
+        amount: { type: 'string', description: 'Amount in human-readable units, or all/max. For native ETH all/max, gas is reserved automatically.' },
+        nativeReserveEth: { type: 'string', description: 'ETH to keep for gas when amount is all/max for the native token. Default: 0.0005 ETH.' },
         decimals: { type: 'number', description: 'Token decimals. Default: 6 for stablecoins, 18 for ETH' },
         maxLossPercent: { type: 'number', description: 'Maximum allowed estimated value loss in %. Default 10, cannot be raised above 10.' },
         toAddress: { type: 'string', description: 'Destination address (defaults to sender)' },
@@ -155,7 +165,8 @@ const TOOLS = [
         toChain: { type: 'string', description: 'Destination chain (for bridge/quote)' },
         tokenIn: { type: 'string', description: 'Input token address (for bridge/quote)' },
         tokenOut: { type: 'string', description: 'Output token address (for bridge/quote). Defaults to same as input.' },
-        amount: { type: 'string', description: 'Amount in human-readable units (e.g. "10" for 10 USDC). Converted to wei internally.' },
+        amount: { type: 'string', description: 'Amount in human-readable units, or all/max. For native ETH all/max, gas is reserved automatically.' },
+        nativeReserveEth: { type: 'string', description: 'ETH to keep for gas when amount is all/max for the native token. Default: 0.0005 ETH.' },
         decimals: { type: 'number', description: 'Token decimals. Default: 6 for stablecoins, 18 for ETH' },
         orderId: { type: 'string', description: 'Order ID or tx hash (for status)' },
       },
@@ -197,6 +208,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         token: tokenIn,
         account: w.address as `0x${string}`,
         client: pub,
+        nativeReserve: args.nativeReserveEth,
       })).toString()
       const qs = new URLSearchParams({
         fromChain: String(fromId),
@@ -292,8 +304,9 @@ async function handle(name: string, args: Record<string, unknown>) {
         chain: fromChain,
       })
 
+      let approvalHashes: `0x${string}`[] = []
       if (!isNativeToken(tokenIn) && quote.estimate?.approvalAddress) {
-        await approveExactIfNeeded({
+        approvalHashes = await approveExactIfNeeded({
           chain: fromChain,
           token: tokenIn as `0x${string}`,
           owner: w.address as `0x${string}`,
@@ -317,6 +330,7 @@ async function handle(name: string, args: Record<string, unknown>) {
       return text(
         safetyNotice +
         preview.replace('No live route was executed.', 'Live route was submitted.') +
+        approvalSummary(fromChain, approvalHashes) +
         `\nSource transaction: ${explorer}\n\n` +
         (toChain === 'hyperliquid'
           ? `After it completes, ask me: "Check my Hyperliquid account".\n`
@@ -352,6 +366,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           token,
           account: w.address as `0x${string}`,
           client: pub,
+          nativeReserve: args.nativeReserveEth,
         })).toString()
         const toAddress = (args.toAddress as string) || w.address
 
@@ -406,6 +421,7 @@ async function handle(name: string, args: Record<string, unknown>) {
 
           // Execute each step (usually 1 approval + 1 bridge tx, or just 1 for native)
           let lastHash = ''
+          const approvalHashes: `0x${string}`[] = []
           for (const step of quoteData.steps) {
             for (const item of step.items) {
               const txData = item.data
@@ -413,7 +429,7 @@ async function handle(name: string, args: Record<string, unknown>) {
                 ? decodeApproval(txData.data || '0x')
                 : null
               if (relayApproval) {
-                await approveExactIfNeeded({
+                approvalHashes.push(...await approveExactIfNeeded({
                   chain: fromChain,
                   token: token as `0x${string}`,
                   owner: w.address as `0x${string}`,
@@ -422,7 +438,7 @@ async function handle(name: string, args: Record<string, unknown>) {
                   pub,
                   wc,
                   wallet: getAccount(w),
-                })
+                }))
                 continue
               }
               await assertNativeBalanceCoversTx({
@@ -464,6 +480,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             `Recipient: ${toAddress}\n` +
             `Est. Time: ~${timeEst}s\n\n` +
             `Wallet: ${w.name} (${w.address})\n` +
+            approvalSummary(fromChain, approvalHashes) +
             `Tx: ${explorer}`
           )
         } catch (e) {
@@ -485,6 +502,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           token,
           account: w.address as `0x${string}`,
           client: getPublicClient(fromChain),
+          nativeReserve: args.nativeReserveEth,
         })).toString()
 
         const fromId = CHAIN_IDS[fromChain]
@@ -568,6 +586,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           token: tokenIn,
           account: w.address as `0x${string}`,
           client: getPublicClient(fromChain),
+          nativeReserve: args.nativeReserveEth,
         })).toString()
 
         const fromId = CHAIN_IDS[fromChain]
@@ -600,12 +619,13 @@ async function handle(name: string, args: Record<string, unknown>) {
           // Step 2: Check if ERC-20 approval is needed (non-native tokens)
           const isNativeToken = tokenIn.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
                                 tokenIn.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+          let approvalHashes: `0x${string}`[] = []
 
           if (!isNativeToken) {
             const pub = getPublicClient(fromChain)
             const spender = txData.tx.to as `0x${string}`
             const wc = getChainsWalletClient(fromChain, w)
-            await approveExactIfNeeded({
+            approvalHashes = await approveExactIfNeeded({
               chain: fromChain,
               token: tokenIn as `0x${string}`,
               owner: w.address as `0x${string}`,
@@ -649,6 +669,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             `To: ~${formattedOut} ${outName} on ${toChain}\n` +
             `Est. Time: ~${delay}s\n\n` +
             `Wallet: ${w.name} (${w.address})\n` +
+            approvalSummary(fromChain, approvalHashes) +
             `Tx: ${explorer}\n` +
             `Order: ${txData.orderId || hash}\n\n` +
             `💡 Use action 'status' with orderId to track fulfillment.`
@@ -672,6 +693,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           token: tokenIn,
           account: quoteWallet.address as `0x${string}`,
           client: getPublicClient(fromChain),
+          nativeReserve: args.nativeReserveEth,
         })).toString()
 
         const fromId = CHAIN_IDS[fromChain]

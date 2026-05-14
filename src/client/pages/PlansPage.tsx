@@ -8,7 +8,7 @@ const plans = [
     name: 'Free',
     price: '$0',
     period: 'forever',
-    note: 'No account needed. Add the MCP server URL and start using the open tools instantly.',
+    note: 'Create an account, generate an API key or connector URL, and start with the open tools.',
     points: [
       'Hosted MCP access',
       'Manual DeFi actions',
@@ -57,7 +57,7 @@ const comparisonRows = [
   { feature: 'Auto-execute', free: '-', pro: 'Yes', ultra: 'Yes' },
   { feature: 'Custom sources', free: '-', pro: '25', ultra: '100' },
   { feature: 'Priority queue', free: '-', pro: 'Yes', ultra: 'Highest' },
-  { feature: 'API key', free: '-', pro: 'Yes', ultra: 'Yes' },
+  { feature: 'API key', free: 'Yes', pro: 'Yes', ultra: 'Yes' },
 ] as const
 
 export default function PlansPage() {
@@ -95,7 +95,7 @@ export default function PlansPage() {
                 ))}
               </ul>
               {plan.id === 'free' ? (
-                <div className="plan-static">Connect MCP - no signup</div>
+                <Link className="plan-button plan-button--outline" to="/dashboard">Create Access Key</Link>
               ) : (
                 <Link className="plan-button" to={`/checkout?plan=${plan.id}`}>
                   {plan.cta}
@@ -129,7 +129,7 @@ export default function PlansPage() {
         {/* Bottom CTA */}
         <section className="plans-bottom-cta">
           <h2>Start Free. Upgrade Anytime.</h2>
-          <p>Add the MCP server URL to your agent and go. No account, no credit card.</p>
+          <p>Create your AGNT account, generate a key, and upgrade when you need more automation capacity.</p>
           <div className="plans-bottom-actions">
             <Link to="/toolkit" className="plan-button">Access Toolkit</Link>
             <Link to="/docs" className="plan-button plan-button--outline">Read Docs</Link>

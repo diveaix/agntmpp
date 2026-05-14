@@ -130,6 +130,9 @@ export interface EventTriggerAutomationParams {
   action: EventAutomationAction
   policy: AutomationPolicy
   mode: AutomationMode
+  verificationMode?: 'speed' | 'balanced' | 'fortress'
+  actionReady?: boolean
+  readinessReason?: string
   validUntil: string
   validFor: string
 }

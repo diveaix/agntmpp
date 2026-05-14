@@ -454,9 +454,13 @@ export default function CheckoutPage() {
                   className={`co-network${paymentNetwork === opt.id ? ' co-network--active' : ''}`}
                   disabled={busy !== null || opt.disabled || !emailVerified}
                   onClick={() => resetQuoteForNetwork(opt.id)}
+                  style={{
+                    backgroundColor: paymentNetwork === opt.id ? '#fff' : 'rgba(255,255,255,.03)',
+                    borderColor: paymentNetwork === opt.id ? '#fff' : 'rgba(255,255,255,.06)',
+                  }}
                 >
-                  <strong>{opt.label}</strong>
-                  <span>{opt.note}</span>
+                  <strong style={{ color: paymentNetwork === opt.id ? '#000' : '#fff', fontSize: '12px', fontWeight: 700 }}>{opt.label}</strong>
+                  <span style={{ color: paymentNetwork === opt.id ? '#444' : '#555', fontSize: '9px' }}>{opt.note}</span>
                 </button>
               ))}
             </div>

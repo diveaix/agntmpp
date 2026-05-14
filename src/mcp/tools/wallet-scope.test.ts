@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createWallet, listWallets, recoverLegacyWallet } from '../wallet.js'
+import { createWallet, exportWalletBackup, importWalletBackup, listWallets, recoverLegacyWallet } from '../wallet.js'
 import { runWithToolContext } from '../tool-context.js'
+import { hasWalletExportPassword, setWalletExportPassword, verifyWalletExportPassword } from '../wallet-vault.js'
 
 function testPath(name: string): string {
   return `./.agnt/test-${name}-${Date.now()}-${Math.random().toString(16).slice(2)}.enc`
@@ -10,8 +11,12 @@ function testPath(name: string): string {
 async function withWalletPath<T>(fn: () => Promise<T>): Promise<T> {
   const previousWalletPath = process.env.AGNT_WALLET_PATH
   const previousWalletDir = process.env.AGNT_WALLET_DIR
+  const previousVaultPath = process.env.AGNT_WALLET_VAULT_PATH
+  const previousVaultDir = process.env.AGNT_WALLET_VAULT_DIR
   process.env.AGNT_WALLET_PATH = testPath('scoped-wallet-root')
   process.env.AGNT_WALLET_DIR = `./.agnt/test-wallet-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  process.env.AGNT_WALLET_VAULT_PATH = testPath('scoped-wallet-vault-root')
+  process.env.AGNT_WALLET_VAULT_DIR = `./.agnt/test-wallet-vault-dir-${Date.now()}-${Math.random().toString(16).slice(2)}`
   try {
     return await fn()
   } finally {
@@ -19,6 +24,10 @@ async function withWalletPath<T>(fn: () => Promise<T>): Promise<T> {
     else process.env.AGNT_WALLET_PATH = previousWalletPath
     if (previousWalletDir === undefined) delete process.env.AGNT_WALLET_DIR
     else process.env.AGNT_WALLET_DIR = previousWalletDir
+    if (previousVaultPath === undefined) delete process.env.AGNT_WALLET_VAULT_PATH
+    else process.env.AGNT_WALLET_VAULT_PATH = previousVaultPath
+    if (previousVaultDir === undefined) delete process.env.AGNT_WALLET_VAULT_DIR
+    else process.env.AGNT_WALLET_VAULT_DIR = previousVaultDir
   }
 }
 
@@ -43,6 +52,21 @@ test('wallet storage is isolated by MCP wallet scope', async () => {
     const sessionAAgain = await runWithToolContext({ walletScope: 'mcp-session:a' }, async () => listWallets())
     assert.equal(sessionAAgain.wallets.length, 1)
     assert.equal(sessionAAgain.wallets[0].address, sessionA.wallet.address)
+  })
+})
+
+test('wallet export passwords are isolated by wallet scope', async () => {
+  await withWalletPath(async () => {
+    await runWithToolContext({ walletScope: 'user:one' }, async () => {
+      setWalletExportPassword('correct horse battery staple')
+      assert.equal(hasWalletExportPassword(), true)
+      assert.equal(verifyWalletExportPassword('correct horse battery staple'), true)
+    })
+
+    await runWithToolContext({ walletScope: 'user:two' }, async () => {
+      assert.equal(hasWalletExportPassword(), false)
+      assert.equal(verifyWalletExportPassword('correct horse battery staple'), false)
+    })
   })
 })
 
@@ -87,5 +111,31 @@ test('legacy global wallet can be recovered into scoped wallet storage', async (
     const scopedAfter = await runWithToolContext({ walletScope: 'mcp-session:recover' }, async () => listWallets())
     assert.equal(scopedAfter.wallets.length, 1)
     assert.equal(scopedAfter.wallets[0].address, legacy.address)
+  })
+})
+
+test('encrypted wallet backups import only into the current wallet scope', async () => {
+  await withWalletPath(async () => {
+    const backup = await runWithToolContext({ walletScope: 'user:backup-source' }, async () => {
+      const wallet = createWallet('Backup Wallet')
+      const exported = exportWalletBackup('correct horse battery staple')
+      return { wallet, exported }
+    })
+
+    assert.equal(backup.exported.walletCount, 1)
+    assert.doesNotMatch(backup.exported.backup, /Backup Wallet/)
+    assert.doesNotMatch(backup.exported.backup, /0x[a-fA-F0-9]{64}/)
+
+    await runWithToolContext({ walletScope: 'user:backup-target' }, async () => {
+      const imported = importWalletBackup(backup.exported.backup, 'correct horse battery staple')
+      assert.equal(imported.imported, 1)
+      assert.equal(imported.skipped, 0)
+      assert.equal(imported.activeWallet?.address, backup.wallet.address)
+      assert.equal(listWallets().wallets.length, 1)
+    })
+
+    await runWithToolContext({ walletScope: 'user:backup-source' }, async () => {
+      assert.equal(listWallets().wallets.length, 1)
+    })
   })
 })

@@ -15,6 +15,7 @@ export interface HyperliquidSetupStatus {
   address?: string
   accountValue?: number
   availableMargin?: number
+  requiredMargin?: number
   openPositions?: number
 }
 
@@ -92,6 +93,7 @@ export function getHyperliquidSetupBlocker(action: string, status: HyperliquidSe
   if (READ_ONLY_ACTIONS.has(action)) return null
   if (!status.hasWallet) return 'wallet'
   if ((status.availableMargin ?? 0) <= 0) return 'funding'
+  if (status.requiredMargin !== undefined && (status.availableMargin ?? 0) < status.requiredMargin) return 'funding'
   return null
 }
 
@@ -107,6 +109,7 @@ export function formatHyperliquidSetupGuide(status: HyperliquidSetupStatus = { h
     lines.push(`  Wallet: ${status.walletName || 'Active'} (${status.address || 'address unavailable'})`)
     lines.push(`  Account value: $${(status.accountValue ?? 0).toFixed(2)}`)
     lines.push(`  Available to trade: $${(status.availableMargin ?? 0).toFixed(2)}`)
+    if (status.requiredMargin !== undefined) lines.push(`  Needed for this automation: $${status.requiredMargin.toFixed(2)}`)
     lines.push(`  Open positions: ${status.openPositions ?? 0}`)
   } else {
     lines.push('  Wallet: not selected')

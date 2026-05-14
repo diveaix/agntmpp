@@ -99,13 +99,6 @@ type WalletSummary = {
   balances: WalletBalance[]
 }
 
-type WalletsResponse = {
-  wallets: WalletSummary[]
-  activeIndex: number
-  exportAvailable: boolean
-  passwordSet: boolean
-}
-
 type DashboardMe = {
   user: { id: string; email?: string }
   plan: string
@@ -182,9 +175,39 @@ function visibleBalances(balances: WalletBalance[]) {
 const TABS = ['overview', 'wallets', 'keys', 'automations', 'sources', 'history'] as const
 type Tab = typeof TABS[number]
 
+type HistoryFilter = 'all' | 'swaps' | 'bridges' | 'approvals' | 'automations' | 'polymarket' | 'hyperliquid' | 'failures'
+
+const HISTORY_FILTERS: { id: HistoryFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'swaps', label: 'Swaps' },
+  { id: 'bridges', label: 'Bridges' },
+  { id: 'approvals', label: 'Approvals' },
+  { id: 'automations', label: 'Automations' },
+  { id: 'polymarket', label: 'Polymarket' },
+  { id: 'hyperliquid', label: 'Hyperliquid' },
+  { id: 'failures', label: 'Failures' },
+]
+
+function historyText(item: HistoryItem) {
+  return `${item.type} ${item.title || ''} ${item.automationName || ''} ${item.result || ''}`.toLowerCase()
+}
+
+function historyMatchesFilter(item: HistoryItem, filter: HistoryFilter) {
+  const text = historyText(item)
+  if (filter === 'all') return true
+  if (filter === 'failures') return !item.success
+  if (filter === 'automations') return item.kind === 'automation'
+  if (filter === 'swaps') return text.includes('swap') || ['tempo_swap', 'smart_swap', 'uniswap', 'pancakeswap'].some((tool) => item.type.includes(tool))
+  if (filter === 'bridges') return text.includes('bridge') || ['relay', 'jumper', 'debridge', 'tempo_bridge'].some((tool) => item.type.includes(tool))
+  if (filter === 'approvals') return text.includes('approve') || text.includes('approval') || text.includes('allowance')
+  if (filter === 'polymarket') return text.includes('polymarket')
+  if (filter === 'hyperliquid') return text.includes('hyperliquid') || text.includes('hl_')
+  return true
+}
+
 export default function DashboardPage() {
   const [email, setEmail] = useState('')
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'reset'>('login')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [code, setCode] = useState('')
@@ -210,7 +233,7 @@ export default function DashboardPage() {
   const [newSourceKeywords, setNewSourceKeywords] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState('')
-  const [initializing, setInitializing] = useState(!dashboardSnapshot)
+  const [initializing, setInitializing] = useState(true)
   const [tab, setTab] = useState<Tab>('overview')
 
   const sourceUsage = useMemo(() => `${sources.length} / ${sourceLimit}`, [sources.length, sourceLimit])
@@ -218,45 +241,53 @@ export default function DashboardPage() {
     () => automations.filter((automation) => automation.status === 'active' || automation.status === 'paused'),
     [automations],
   )
-  const paidDashboard = me ? (me.plan === 'pro' || me.plan === 'max') && (me.subscriptionStatus === 'active' || me.subscriptionStatus === 'trialing') : false
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
+  const filteredHistory = useMemo(
+    () => history.filter((item) => historyMatchesFilter(item, historyFilter)),
+    [history, historyFilter],
+  )
+
+  function clearDashboardData() {
+    dashboardSnapshot = null
+    setMe(null)
+    setApiKeys([])
+    setConnectorLinks([])
+    setAutomations([])
+    setHistory([])
+    setSources([])
+    setSourceLimit(0)
+    setWallets([])
+    setWalletExportAvailable(false)
+    setWalletPasswordSet(false)
+    setWalletPrivateKeys({})
+    setRevealed({})
+    setConnectorUrl('')
+  }
 
   async function refreshDashboard() {
     setBusy((current) => current || 'refresh')
     try {
-      const meResponse = await fetch('/dashboard/me', { credentials: 'include' })
-      if (meResponse.status === 401 || meResponse.status === 403) {
-        dashboardSnapshot = null
-        setMe(null)
-        setApiKeys([])
-        setConnectorLinks([])
-        setAutomations([])
-        setHistory([])
-        setSources([])
-        setWallets([])
+      const snapshotResponse = await fetch('/dashboard/snapshot', { credentials: 'include' })
+      if (snapshotResponse.status === 401 || snapshotResponse.status === 403) {
+        clearDashboardData()
         setStatus('')
         return
       }
-      const meJson = await readJson<DashboardMe>(meResponse)
+      const snapshot = await readJson<DashboardSnapshot & { error?: string; error_description?: string }>(snapshotResponse)
+      const meJson = snapshot.me
       setMe(meJson)
       setEmail(meJson.user.email || email)
-      setApiKeys(meJson.apiKeys || [])
+      setApiKeys(snapshot.apiKeys || meJson.apiKeys || [])
       setInitializing(false)
 
-      const [autosResult, historyResult, sourcesResult, walletsResult, connectorsResult] = await Promise.allSettled([
-        fetch('/dashboard/automations', { credentials: 'include' }).then((res) => readJson<{ automations: Automation[] }>(res)),
-        fetch('/dashboard/history', { credentials: 'include' }).then((res) => readJson<{ history: HistoryItem[] }>(res)),
-        fetch('/dashboard/sources', { credentials: 'include' }).then((res) => readJson<{ sources: Source[]; limit: number }>(res)),
-        fetch('/dashboard/wallets', { credentials: 'include' }).then((res) => readJson<WalletsResponse>(res)),
-        fetch('/dashboard/connector-links', { credentials: 'include' }).then((res) => readJson<{ connectorLinks: ConnectorLink[] }>(res)),
-      ])
-      const nextConnectorLinks = connectorsResult.status === 'fulfilled' ? connectorsResult.value.connectorLinks || [] : connectorLinks
-      const nextAutomations = autosResult.status === 'fulfilled' ? autosResult.value.automations || [] : automations
-      const nextHistory = historyResult.status === 'fulfilled' ? historyResult.value.history || [] : history
-      const nextSources = sourcesResult.status === 'fulfilled' ? sourcesResult.value.sources || [] : sources
-      const nextSourceLimit = sourcesResult.status === 'fulfilled' ? sourcesResult.value.limit || 0 : sourceLimit
-      const nextWallets = walletsResult.status === 'fulfilled' ? walletsResult.value.wallets || [] : wallets
-      const nextWalletExportAvailable = walletsResult.status === 'fulfilled' ? walletsResult.value.exportAvailable || false : walletExportAvailable
-      const nextWalletPasswordSet = walletsResult.status === 'fulfilled' ? walletsResult.value.passwordSet || false : walletPasswordSet
+      const nextConnectorLinks = snapshot.connectorLinks || []
+      const nextAutomations = snapshot.automations || []
+      const nextHistory = snapshot.history || []
+      const nextSources = snapshot.sources || []
+      const nextSourceLimit = snapshot.sourceLimit || 0
+      const nextWallets = snapshot.wallets || []
+      const nextWalletExportAvailable = snapshot.walletExportAvailable || false
+      const nextWalletPasswordSet = snapshot.walletPasswordSet || false
 
       setConnectorLinks(nextConnectorLinks)
       setAutomations(nextAutomations)
@@ -268,7 +299,7 @@ export default function DashboardPage() {
       setWalletPasswordSet(nextWalletPasswordSet)
       dashboardSnapshot = {
         me: meJson,
-        apiKeys: meJson.apiKeys || [],
+        apiKeys: snapshot.apiKeys || meJson.apiKeys || [],
         connectorLinks: nextConnectorLinks,
         automations: nextAutomations,
         history: nextHistory,
@@ -280,8 +311,7 @@ export default function DashboardPage() {
       }
       setStatus('')
     } catch (error) {
-      dashboardSnapshot = null
-      setMe(null)
+      clearDashboardData()
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
       setBusy('')
@@ -306,25 +336,7 @@ export default function DashboardPage() {
         body: JSON.stringify({ email }),
       }).then((res) => readJson<{ email: string; expiresAt: string; devCode?: string }>(res))
       setDevCode(json.devCode || '')
-      setStatus(`Confirmation code sent to ${json.email}.`)
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  async function verifyCode() {
-    setBusy('verify')
-    setStatus('')
-    try {
-      await fetch('/auth/email/verify', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
-      }).then((res) => readJson<{ user: { email?: string } }>(res))
-      await refreshDashboard()
+      setStatus(`${authMode === 'reset' ? 'Reset' : 'Confirmation'} code sent to ${json.email}.`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -336,18 +348,9 @@ export default function DashboardPage() {
     setBusy('logout')
     try {
       await fetch('/auth/logout', { method: 'POST', credentials: 'include' }).then((res) => readJson<{ ok: boolean }>(res))
-      dashboardSnapshot = null
-      setMe(null)
-      setApiKeys([])
-      setConnectorLinks([])
-      setAutomations([])
-      setHistory([])
-      setSources([])
-      setWallets([])
-      setWalletPrivateKeys({})
-      setRevealed({})
-      setConnectorUrl('')
+      clearDashboardData()
       setStatus('Logged out.')
+      setTimeout(() => setStatus(''), 4000)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -370,10 +373,6 @@ export default function DashboardPage() {
   }
 
   async function createKey() {
-    if (!paidDashboard) {
-      setStatus('API keys are available on Pro and Ultra plans only.')
-      return
-    }
     setBusy('key')
     try {
       const json = await fetch('/dashboard/api-keys', {
@@ -409,10 +408,6 @@ export default function DashboardPage() {
   }
 
   async function createConnectorLink() {
-    if (!paidDashboard) {
-      setStatus('Claude connector links are available on Pro and Ultra plans only.')
-      return
-    }
     setBusy('connector')
     try {
       const json = await fetch('/dashboard/connector-links', {
@@ -549,6 +544,36 @@ export default function DashboardPage() {
       }).then((res) => readJson<{ user: { email?: string } }>(res))
       setPassword('')
       setPasswordConfirm('')
+      setInitializing(true)
+      clearDashboardData()
+      await refreshDashboard()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function resetPassword() {
+    if (password !== passwordConfirm) {
+      setStatus('Passwords do not match.')
+      return
+    }
+    setBusy('reset')
+    setStatus('')
+    try {
+      await fetch('/auth/password/reset', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, password }),
+      }).then((res) => readJson<{ user: { email?: string } }>(res))
+      setCode('')
+      setDevCode('')
+      setPassword('')
+      setPasswordConfirm('')
+      setInitializing(true)
+      clearDashboardData()
       await refreshDashboard()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -614,7 +639,7 @@ export default function DashboardPage() {
         <Nav />
         <main className="dash">
           <section className="dash-login-card dash-loading-card">
-            <div className="dash-login-icon">AGNT</div>
+
             <h2>Loading Dashboard</h2>
             <p>Checking your saved session.</p>
             <div className="dash-loading-bar"><span /></div>
@@ -631,10 +656,16 @@ export default function DashboardPage() {
         <Nav />
         <main className="dash">
           <section className="dash-login-card">
-            <div className="dash-login-icon">AGNT</div>
-            <h2>{authMode === 'signup' ? 'Create Dashboard Account' : 'Dashboard Login'}</h2>
-            <p>{authMode === 'signup' ? 'Set a password for dashboard login. The same password becomes your local wallet export password.' : 'Login with the email and password you used during signup.'}</p>
-            <div className="dash-auth-toggle">
+
+            <h2>{authMode === 'signup' ? 'Create Dashboard Account' : authMode === 'reset' ? 'Reset Password' : 'Dashboard Login'}</h2>
+            <p>
+              {authMode === 'signup'
+                ? 'Create your account to get started.'
+                : authMode === 'reset'
+                  ? 'Enter your email and set a new password.'
+                  : 'Sign in to your dashboard.'}
+            </p>
+            <div className="dash-auth-toggle" data-active={authMode === 'signup' ? '1' : '0'}>
               <button type="button" className={authMode === 'login' ? 'dash-auth-toggle__on' : ''} onClick={() => setAuthMode('login')}>Login</button>
               <button type="button" className={authMode === 'signup' ? 'dash-auth-toggle__on' : ''} onClick={() => setAuthMode('signup')}>Signup</button>
             </div>
@@ -644,38 +675,39 @@ export default function DashboardPage() {
                 <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
               </div>
               <div className="dash-field-group">
-                <label>Password</label>
+                <label>{authMode === 'reset' ? 'New password' : 'Password'}</label>
                 <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="minimum 8 characters" />
+                {authMode === 'login' && (
+                  <span className="dash-forgot-link" onClick={() => setAuthMode('reset')}>Forgot password?</span>
+                )}
               </div>
-              {authMode === 'signup' && (
+              {(authMode === 'signup' || authMode === 'reset') && (
                 <div className="dash-field-group">
                   <label>Confirm password</label>
                   <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} placeholder="repeat password" />
                 </div>
               )}
-              <button type="button" onClick={() => passwordAuth(authMode)} disabled={busy !== '' || !email || !password || (authMode === 'signup' && !passwordConfirm)}>
-                {busy === authMode ? (authMode === 'signup' ? 'Creating...' : 'Logging in...') : (authMode === 'signup' ? 'Create account' : 'Login')}
-              </button>
+              {authMode !== 'reset' && (
+                <button type="button" onClick={() => passwordAuth(authMode)} disabled={busy !== '' || !email || !password || (authMode === 'signup' && !passwordConfirm)}>
+                  {busy === authMode ? (authMode === 'signup' ? 'Creating...' : 'Logging in...') : (authMode === 'signup' ? 'Create account' : 'Login')}
+                </button>
+              )}
             </div>
-            <div className="dash-login-fields">
-              <div className="dash-field-group">
-                <label>Email address</label>
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-              </div>
-              <button type="button" onClick={sendCode} disabled={busy === 'send' || busy === 'verify' || !email}>
-                {busy === 'send' ? 'Sending…' : 'Send code'}
+            {authMode === 'reset' && <div className="dash-login-fields">
+              <button type="button" onClick={sendCode} disabled={busy !== '' || !email}>
+                {busy === 'send' ? 'Sending...' : 'Send reset code'}
               </button>
-            </div>
+            </div>}
             {devCode && <p className="dash-dev-code">Dev code: {devCode}</p>}
-            <div className="dash-login-fields">
+            {authMode === 'reset' && <div className="dash-login-fields">
               <div className="dash-field-group">
-                <label>Confirmation code</label>
+                <label>Reset code</label>
                 <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" />
               </div>
-              <button type="button" onClick={verifyCode} disabled={busy === 'send' || busy === 'verify' || !code}>
-                {busy === 'verify' ? 'Verifying…' : 'Login'}
+              <button type="button" onClick={resetPassword} disabled={busy !== '' || !email || !code || !password || !passwordConfirm}>
+                {busy === 'reset' ? 'Resetting...' : 'Reset password'}
               </button>
-            </div>
+            </div>}
             {statusBar}
           </section>
         </main>
@@ -814,9 +846,9 @@ export default function DashboardPage() {
             <section className="dash-section">
               <div className="dash-section__bar">
                 <h2>API Keys</h2>
-                <div className="dash-section__row"><input value={newKeyLabel} onChange={(e) => setNewKeyLabel(e.target.value)} placeholder="key label" disabled={!paidDashboard} /><button className="dash-btn" onClick={createKey} disabled={busy !== '' || !paidDashboard}>New key</button></div>
+                <div className="dash-section__row"><input value={newKeyLabel} onChange={(e) => setNewKeyLabel(e.target.value)} placeholder="key label" /><button className="dash-btn" onClick={createKey} disabled={busy !== ''}>New key</button></div>
               </div>
-              {!paidDashboard && <div className="dash-note">Free accounts can view the dashboard. Upgrade to Pro or Ultra to create API keys and connector URLs.</div>}
+              <div className="dash-note">API keys and connector URLs are linked to this email account. Reconnect later with the same key to access the same wallets.</div>
               {revealed.created && <div className="dash-secret-row"><code className="dash-secret">{revealed.created}</code><CopyBtn value={revealed.created} /></div>}
               <div className="dash-list">
                 {apiKeys.map((key) => (
@@ -833,7 +865,7 @@ export default function DashboardPage() {
               </div>
               <div className="dash-section__bar dash-section__bar--sub">
                 <div><h2>Claude Connectors</h2><p className="dash-hint">Use when Claude has no API-key field.</p></div>
-                <button className="dash-btn" onClick={createConnectorLink} disabled={busy !== '' || !paidDashboard || apiKeys.filter((k) => !k.revokedAt).length === 0}>Create URL</button>
+                <button className="dash-btn" onClick={createConnectorLink} disabled={busy !== '' || apiKeys.filter((k) => !k.revokedAt).length === 0}>Create URL</button>
               </div>
               {connectorUrl && (
                 <div className="dash-row"><div className="dash-row__info"><strong>New connector URL</strong><span>Shown once. Paste into Claude.</span><code>{connectorUrl}</code></div><div className="dash-row__act"><CopyBtn value={connectorUrl} /><button className="dash-btn dash-btn--sm" onClick={() => setConnectorUrl('')}>Hide</button></div></div>
@@ -883,10 +915,25 @@ export default function DashboardPage() {
 
           {tab === 'history' && (
             <section className="dash-section">
-              <div className="dash-section__bar"><h2>Execution History</h2></div>
+              <div className="dash-section__bar">
+                <h2>Execution History</h2>
+                <span className="dash-count">{filteredHistory.length} / {history.length}</span>
+              </div>
+              <div className="dash-filter-row" aria-label="History filters">
+                {HISTORY_FILTERS.map((filter) => (
+                  <button
+                    key={filter.id}
+                    className={`dash-filter ${historyFilter === filter.id ? 'dash-filter--on' : ''}`}
+                    onClick={() => setHistoryFilter(filter.id)}
+                    type="button"
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
               <div className="dash-list">
-                {history.map((item) => (
-                  <div className="dash-row" key={`${item.automationId}-${item.time}`}>
+                {filteredHistory.map((item) => (
+                  <div className="dash-row" key={`${item.automationId}-${item.type}-${item.time}`}>
                     <div className="dash-row__info">
                       <strong>{item.title || item.automationName}</strong>
                       <span><span className={`dash-dot dash-dot--${item.success ? 'active' : 'cancelled'}`} />{dateText(item.time)} / {item.kind === 'tool' ? item.type.replace(/_/g, ' ') : item.type} / {item.success ? 'success' : 'failed'}</span>
@@ -895,6 +942,7 @@ export default function DashboardPage() {
                   </div>
                 ))}
                 {history.length === 0 && <p className="dash-empty">No execution history yet.</p>}
+                {history.length > 0 && filteredHistory.length === 0 && <p className="dash-empty">No history for this filter yet.</p>}
               </div>
             </section>
           )}

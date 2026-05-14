@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
 type RespLine =
   | { k: 'ok'; t: string }
@@ -89,27 +89,14 @@ function delay(ms: number) {
 }
 
 function RespRow({ line }: { line: RespLine }) {
-  if (line.k === 'br') return <div className="cc-resp-row cc-resp-row--gap" aria-hidden />
+  if (line.k === 'br') return <div className="ld-resp-gap" aria-hidden />
   if (line.k === 'ok')
-    return (
-      <div className="cc-resp-row">
-        <span className="cc-ok">{line.t}</span>
-      </div>
-    )
+    return <div className="ld-line"><span className="ld-ok">{line.t}</span></div>
   if (line.k === 'dim')
-    return (
-      <div className="cc-resp-row">
-        <span className="cc-dim">{line.t}</span>
-      </div>
-    )
+    return <div className="ld-line"><span className="ld-dim">{line.t}</span></div>
   if (line.k === 'inline')
-    return (
-      <div className="cc-resp-row">
-        <span className="cc-dim">{line.dim}</span>
-        {line.rest}
-      </div>
-    )
-  return <div className="cc-resp-row">{line.t}</div>
+    return <div className="ld-line"><span className="ld-dim">{line.dim}</span>{line.rest}</div>
+  return <div className="ld-line">{line.t}</div>
 }
 
 type GState = { u: number; t: boolean; r: number }
@@ -122,6 +109,14 @@ export default function LiveDemoTerminal({ isOpen }: { isOpen: boolean }) {
   const [boot, setBoot] = useState(false)
   const [states, setStates] = useState<GState[]>(emptyStates)
   const [runDone, setRunDone] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom as content arrives
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    }
+  }, [states, boot, runDone])
 
   useEffect(() => {
     if (!isOpen) {
@@ -214,17 +209,12 @@ export default function LiveDemoTerminal({ isOpen }: { isOpen: boolean }) {
   }, [isOpen])
 
   return (
-    <div className={`terminal-window${boot ? ' terminal-window--live-boot' : ''}`}>
-      <div className="terminal-header">
-        <div className="terminal-dots">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-        <div className="terminal-title">AGNT — ~/projects/alpha-fund</div>
-        <div></div>
+    <div className="ld-terminal">
+      <div className="ld-terminal-header">
+        <div className="ld-terminal-dots"><span /><span /><span /></div>
+        <div className="ld-terminal-title">AGNT — ~/projects/alpha-fund</div>
       </div>
-      <div className={`terminal-body${boot ? ' terminal-body--live' : ''}`}>
+      <div className={`ld-terminal-body${boot ? ' ld-boot' : ''}`} ref={bodyRef}>
         {GROUPS.map((g, gi) => {
           const st = states[gi] ?? { u: 0, t: false, r: 0 }
           const userVisible = g.user.slice(0, st.u)
@@ -232,22 +222,22 @@ export default function LiveDemoTerminal({ isOpen }: { isOpen: boolean }) {
           const showUser = st.u > 0
 
           return (
-            <div key={gi} className="live-demo-exchange">
+            <div key={gi} className="ld-exchange">
               {showUser && (
-                <div className={`cc-line cc-user${typing ? ' cc-user--typing' : ''}`}>
-                  <span className="cc-prompt">$</span> {userVisible}
-                  {typing && <span className="cc-typing-caret" aria-hidden />}
+                <div className={`ld-line ld-user${typing ? ' ld-typing' : ''}`}>
+                  <span className="ld-prompt">$</span> {userVisible}
+                  {typing && <span className="ld-caret" aria-hidden />}
                 </div>
               )}
               {st.t &&
                 g.tools.map((tool, ti) => (
-                  <div key={`${gi}-tool-${ti}`} className="cc-line cc-tool cc-tool--reveal">
-                    <span className="cc-tool-badge">▸ {tool.badge}</span>{' '}
-                    <span className="cc-tool-args">{tool.args}</span>
+                  <div key={`${gi}-tool-${ti}`} className="ld-line ld-tool">
+                    <span className="ld-tool-badge">▸ {tool.badge}</span>{' '}
+                    <span className="ld-tool-args">{tool.args}</span>
                   </div>
                 ))}
               {st.t && st.r > 0 && (
-                <div className="cc-line cc-response">
+                <div className="ld-response">
                   {g.responseLines.slice(0, st.r).map((line, ri) => (
                     <RespRow key={`${gi}-${ri}`} line={line} />
                   ))}
@@ -257,8 +247,8 @@ export default function LiveDemoTerminal({ isOpen }: { isOpen: boolean }) {
           )
         })}
         {runDone && (
-          <div className="live-demo-cursor-row">
-            <span className="cb" />
+          <div className="ld-line ld-cursor-row">
+            <span className="ld-blink-cursor" />
           </div>
         )}
       </div>

@@ -40,19 +40,21 @@ const PREMIUM_TOOLS = new Set([
   'polymarket_trade', 'polymarket_create_account', 'polymarket_fund',
 ])
 
-/** Get the pricing tier for a tool. All tools are free. */
-export function getToolTier(_name: string): PricingTier {
-  return 'free'
+/** Get the pricing tier for a tool. */
+export function getToolTier(name: string): PricingTier {
+  if (FREE_TOOLS.has(name)) return 'free'
+  if (PREMIUM_TOOLS.has(name)) return 'premium'
+  return 'standard'
 }
 
 /** Get the charge amount for a tool. */
-export function getToolPrice(_name: string): string {
-  return '0'
+export function getToolPrice(name: string): string {
+  return PRICING[getToolTier(name)].amount
 }
 
-/** Check if a tool is free. All tools are free. */
-export function isFreeTool(_name: string): boolean {
-  return true
+/** Check if a tool is free. */
+export function isFreeTool(name: string): boolean {
+  return getToolTier(name) === 'free'
 }
 
 /** Get all tool names in a tier. */
