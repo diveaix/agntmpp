@@ -92,3 +92,28 @@ test('lockdown accepts only configured api keys and ignores stored keys', async 
     }
   })
 })
+
+test('access is required by default unless local dev explicitly opts out', () => {
+  const previousRequired = process.env.AGNT_ACCESS_REQUIRED
+  const previousNodeEnv = process.env.NODE_ENV
+  const previousKeys = process.env.AGNT_LOCKDOWN_API_KEYS
+  try {
+    delete process.env.AGNT_ACCESS_REQUIRED
+    delete process.env.AGNT_LOCKDOWN_API_KEYS
+    process.env.NODE_ENV = 'development'
+    assert.equal(isAccessRequired(), true)
+
+    process.env.AGNT_ACCESS_REQUIRED = 'false'
+    assert.equal(isAccessRequired(), false)
+
+    process.env.NODE_ENV = 'production'
+    assert.equal(isAccessRequired(), true)
+  } finally {
+    if (previousRequired === undefined) delete process.env.AGNT_ACCESS_REQUIRED
+    else process.env.AGNT_ACCESS_REQUIRED = previousRequired
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previousNodeEnv
+    if (previousKeys === undefined) delete process.env.AGNT_LOCKDOWN_API_KEYS
+    else process.env.AGNT_LOCKDOWN_API_KEYS = previousKeys
+  }
+})

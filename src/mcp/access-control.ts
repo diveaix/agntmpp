@@ -54,7 +54,9 @@ export function resolveAuthContextFromRequest(headers: IncomingHttpHeaders, rawU
 }
 
 export function isAccessRequired(): boolean {
-  return isLockdownEnabled() || process.env.AGNT_ACCESS_REQUIRED === 'true' || process.env.NODE_ENV === 'production'
+  if (isLockdownEnabled()) return true
+  if (process.env.AGNT_ACCESS_REQUIRED === 'false' && process.env.NODE_ENV !== 'production') return false
+  return true
 }
 
 export function isLockdownEnabled(): boolean {

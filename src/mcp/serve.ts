@@ -349,9 +349,9 @@ app.post('/token', express.json(), express.urlencoded({ extended: true }), (req,
   })
 })
 
-// Auth Middleware to protect MCP endpoints
-// When AGNT_PASSPHRASE is not set, auth is skipped (open dev mode).
-// Set AGNT_PASSPHRASE in .env to enforce JWT protection in production.
+// Auth Middleware to protect MCP endpoints.
+// Access fails closed by default. Local development can opt out with
+// AGNT_ACCESS_REQUIRED=false, but production ignores that opt-out.
 const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (ACCESS_PAUSED) {
     const accessAuth = resolveAuthContextFromRequest(req.headers, req.originalUrl || req.url)
