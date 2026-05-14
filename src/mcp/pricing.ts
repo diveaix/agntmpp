@@ -40,8 +40,13 @@ const PREMIUM_TOOLS = new Set([
   'polymarket_trade', 'polymarket_create_account', 'polymarket_fund',
 ])
 
+export function isMppPaymentGateEnabled(): boolean {
+  return process.env.AGNT_MPP_ENABLED === 'true'
+}
+
 /** Get the pricing tier for a tool. */
 export function getToolTier(name: string): PricingTier {
+  if (!isMppPaymentGateEnabled()) return 'free'
   if (FREE_TOOLS.has(name)) return 'free'
   if (PREMIUM_TOOLS.has(name)) return 'premium'
   return 'standard'
