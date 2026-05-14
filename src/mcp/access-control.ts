@@ -1,8 +1,8 @@
 import type { IncomingHttpHeaders } from 'http'
 import { createHmac, timingSafeEqual } from 'crypto'
 import type { AutomationEntry } from './scheduler.js'
-import type { AuthContext } from './access-types.js'
-import { resolveAuthContextFromApiKey, resolveAuthContextFromConnectorToken, resolveAuthContextForUser } from './access-store.js'
+import type { AccessPlan, AuthContext } from './access-types.js'
+import { getAccessEntitlement, hashApiKey, resolveAuthContextFromApiKey, resolveAuthContextFromConnectorToken, resolveAuthContextForUser } from './access-store.js'
 
 export function extractApiKeyFromHeaders(headers: IncomingHttpHeaders): string | undefined {
   const explicit = headers['x-agnt-api-key']
@@ -40,18 +40,65 @@ export function extractConnectorTokenFromUrl(rawUrl: string | undefined): string
 }
 
 export function resolveAuthContextFromHeaders(headers: IncomingHttpHeaders): AuthContext | null {
-  return resolveAuthContextFromApiKey(extractApiKeyFromHeaders(headers))
+  return resolveAuthContextFromApiKeyWithLockdown(extractApiKeyFromHeaders(headers))
 }
 
 export function resolveAuthContextFromRequest(headers: IncomingHttpHeaders, rawUrl: string | undefined): AuthContext | null {
+  const key = extractApiKeyFromHeaders(headers) || extractApiKeyFromUrl(rawUrl)
+  const locked = resolveLockdownAuthContext(key)
+  if (isLockdownEnabled()) return locked
   return (
-    resolveAuthContextFromApiKey(extractApiKeyFromHeaders(headers) || extractApiKeyFromUrl(rawUrl)) ||
+    resolveAuthContextFromApiKey(key) ||
     resolveAuthContextFromConnectorToken(extractConnectorTokenFromUrl(rawUrl))
   )
 }
 
 export function isAccessRequired(): boolean {
-  return process.env.AGNT_ACCESS_REQUIRED === 'true' || process.env.NODE_ENV === 'production'
+  return isLockdownEnabled() || process.env.AGNT_ACCESS_REQUIRED === 'true' || process.env.NODE_ENV === 'production'
+}
+
+export function isLockdownEnabled(): boolean {
+  return lockdownKeys().length > 0
+}
+
+function lockdownKeys(): string[] {
+  return (process.env.AGNT_LOCKDOWN_API_KEYS || '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter((key) => key.startsWith('agnt_'))
+}
+
+function lockdownPlan(): AccessPlan {
+  const plan = process.env.AGNT_LOCKDOWN_PLAN
+  return plan === 'pro' || plan === 'max' ? plan : 'max'
+}
+
+function resolveAuthContextFromApiKeyWithLockdown(apiKey: string | undefined): AuthContext | null {
+  const locked = resolveLockdownAuthContext(apiKey)
+  if (isLockdownEnabled()) return locked
+  return resolveAuthContextFromApiKey(apiKey)
+}
+
+export function resolveLockdownAuthContext(apiKey: string | undefined): AuthContext | null {
+  if (!apiKey) return null
+  const allowed = lockdownKeys()
+  if (!allowed.length) return null
+  const hash = hashApiKey(apiKey)
+  const matched = allowed.some((allowedKey) => {
+    const left = Buffer.from(hashApiKey(allowedKey), 'hex')
+    const right = Buffer.from(hash, 'hex')
+    return left.length === right.length && timingSafeEqual(left, right)
+  })
+  if (!matched) return null
+  const plan = lockdownPlan()
+  return {
+    userId: `lockdown_${hash.slice(0, 16)}`,
+    apiKeyId: `lockdown_${hash.slice(0, 12)}`,
+    plan,
+    subscriptionStatus: 'active',
+    entitlement: getAccessEntitlement(plan),
+    source: 'api_key',
+  }
 }
 
 export function canRunOwnedAutomation(auto: AutomationEntry): { allowed: boolean; reason: string; auth?: AuthContext } {

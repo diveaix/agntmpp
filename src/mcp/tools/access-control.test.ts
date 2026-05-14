@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createApiKey, createConnectorLink, createUser } from '../access-store.js'
-import { extractApiKeyFromUrl, extractConnectorTokenFromUrl, resolveAuthContextFromRequest } from '../access-control.js'
+import { extractApiKeyFromUrl, extractConnectorTokenFromUrl, isAccessRequired, resolveAuthContextFromRequest } from '../access-control.js'
 
 function testPath(name: string): string {
   return `./.agnt/test-${name}-${Date.now()}-${Math.random().toString(16).slice(2)}.enc`
@@ -15,25 +15,6 @@ async function withAccessPath<T>(fn: () => Promise<T> | T): Promise<T> {
   } finally {
     if (previous === undefined) delete process.env.AGNT_ACCESS_STORE_PATH
     else process.env.AGNT_ACCESS_STORE_PATH = previous
-  }
-}
-
-async function withJudgeKeyEnv<T>(fn: () => Promise<T> | T): Promise<T> {
-  const previousKey = process.env.AGNT_JUDGE_API_KEY
-  const previousUserId = process.env.AGNT_JUDGE_USER_ID
-  const previousPlan = process.env.AGNT_JUDGE_PLAN
-  process.env.AGNT_JUDGE_API_KEY = 'agnt_judge_test_secret'
-  process.env.AGNT_JUDGE_USER_ID = 'judge-hackathon'
-  process.env.AGNT_JUDGE_PLAN = 'max'
-  try {
-    return await fn()
-  } finally {
-    if (previousKey === undefined) delete process.env.AGNT_JUDGE_API_KEY
-    else process.env.AGNT_JUDGE_API_KEY = previousKey
-    if (previousUserId === undefined) delete process.env.AGNT_JUDGE_USER_ID
-    else process.env.AGNT_JUDGE_USER_ID = previousUserId
-    if (previousPlan === undefined) delete process.env.AGNT_JUDGE_PLAN
-    else process.env.AGNT_JUDGE_PLAN = previousPlan
   }
 }
 
@@ -56,18 +37,17 @@ test('request auth accepts URL api key when headers are unavailable', async () =
   })
 })
 
-test('request auth accepts env-provided judge key without an access-store record', async () => {
-  await withAccessPath(async () => {
-    await withJudgeKeyEnv(() => {
-      const headerAuth = resolveAuthContextFromRequest({ 'x-agnt-api-key': 'agnt_judge_test_secret' }, '/mcp')
-      assert.equal(headerAuth?.userId, 'judge-hackathon')
-      assert.equal(headerAuth?.apiKeyId, 'judge-demo-env')
-      assert.equal(headerAuth?.plan, 'max')
-      assert.equal(headerAuth?.source, 'api_key')
-
-      const urlAuth = resolveAuthContextFromRequest({}, '/sse?agnt_api_key=agnt_judge_test_secret')
-      assert.equal(urlAuth?.userId, 'judge-hackathon')
-    })
+test('env-only broad access keys are not accepted', async () => {
+  await withAccessPath(() => {
+    const previous = process.env.AGNT_TEMP_API_KEY
+    process.env.AGNT_TEMP_API_KEY = 'agnt_temp_old_shortcut'
+    try {
+      const auth = resolveAuthContextFromRequest({ 'x-agnt-api-key': 'agnt_temp_old_shortcut' }, '/mcp')
+      assert.equal(auth, null)
+    } finally {
+      if (previous === undefined) delete process.env.AGNT_TEMP_API_KEY
+      else process.env.AGNT_TEMP_API_KEY = previous
+    }
   })
 })
 
@@ -81,5 +61,34 @@ test('request auth accepts revokable connector token from URL', async () => {
     const auth = resolveAuthContextFromRequest({}, '/mcp?agnt_connector_token=agnt_conn_claude_secret')
     assert.equal(auth?.userId, user.id)
     assert.equal(auth?.apiKeyId, key.record.id)
+  })
+})
+
+test('lockdown accepts only configured api keys and ignores stored keys', async () => {
+  await withAccessPath(() => {
+    const previousKeys = process.env.AGNT_LOCKDOWN_API_KEYS
+    const previousPlan = process.env.AGNT_LOCKDOWN_PLAN
+    process.env.AGNT_LOCKDOWN_API_KEYS = 'agnt_judge_allowed,agnt_live_owner_allowed'
+    process.env.AGNT_LOCKDOWN_PLAN = 'max'
+    try {
+      const user = createUser({ email: 'stored@example.com' })
+      createApiKey(user.id, 'stored', undefined, 'agnt_live_stored_secret')
+
+      const judge = resolveAuthContextFromRequest({ 'x-agnt-api-key': 'agnt_judge_allowed' }, '/mcp')
+      const owner = resolveAuthContextFromRequest({ authorization: 'Bearer agnt_live_owner_allowed' }, '/mcp')
+      const stored = resolveAuthContextFromRequest({ 'x-agnt-api-key': 'agnt_live_stored_secret' }, '/mcp')
+      const missing = resolveAuthContextFromRequest({}, '/mcp')
+
+      assert.equal(judge?.plan, 'max')
+      assert.equal(owner?.subscriptionStatus, 'active')
+      assert.equal(stored, null)
+      assert.equal(missing, null)
+      assert.equal(isAccessRequired(), true)
+    } finally {
+      if (previousKeys === undefined) delete process.env.AGNT_LOCKDOWN_API_KEYS
+      else process.env.AGNT_LOCKDOWN_API_KEYS = previousKeys
+      if (previousPlan === undefined) delete process.env.AGNT_LOCKDOWN_PLAN
+      else process.env.AGNT_LOCKDOWN_PLAN = previousPlan
+    }
   })
 })
