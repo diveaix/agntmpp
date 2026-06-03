@@ -98,15 +98,35 @@ async function gammaGet(path: string): Promise<unknown> {
   return res.json()
 }
 
-function parseUrl(input: string): string {
+async function gammaGetOptional<T>(path: string, fallback: T): Promise<T> {
+  try {
+    return await gammaGet(path) as T
+  } catch {
+    return fallback
+  }
+}
+
+function parseJsonArray(value: unknown): any[] {
+  if (Array.isArray(value)) return value
+  if (typeof value !== 'string' || !value.trim()) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function parseUrl(input: string): { slug: string; pageType?: 'event' | 'market' } {
   try {
     const u = new URL(input)
     if (u.hostname.includes('polymarket.com')) {
       const parts = u.pathname.split('/').filter(Boolean)
-      return parts[parts.length - 1]
+      const pageType = parts[0] === 'event' || parts[0] === 'market' ? parts[0] : undefined
+      return { slug: parts[parts.length - 1], pageType }
     }
   } catch { /* not a URL */ }
-  return input
+  return { slug: input.trim() }
 }
 
 interface MarketInfo {
@@ -116,14 +136,71 @@ interface MarketInfo {
   endDate: string; resolved: boolean; outcomes: string[]
 }
 
-async function resolveMarket(input: string): Promise<MarketInfo> {
-  const slug = parseUrl(input)
+interface ResolveMarketOptions {
+  date?: string
+  hint?: string
+}
+
+class PolymarketEventSelectionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PolymarketEventSelectionError'
+  }
+}
+
+function normalizeText(value: unknown): string {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function searchScore(market: any, hints: string[]): number {
+  const haystack = normalizeText(`${market.question || ''} ${market.title || ''} ${market.slug || ''}`)
+  let score = 0
+  for (const hint of hints.map(normalizeText).filter(Boolean)) {
+    const words = hint.split(/\s+/).filter(w => w.length > 1)
+    for (const word of words) if (haystack.includes(word)) score += 1
+    if (hint && haystack.includes(hint)) score += 6
+  }
+  return score
+}
+
+function formatMarketChoice(market: any): string {
+  const info = fmt(market)
+  return `  - ${info.question} | YES ${(info.yesPrice * 100).toFixed(1)}c / NO ${(info.noPrice * 100).toFixed(1)}c | Vol $${info.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })} | ID ${info.id} | slug ${market.slug || 'n/a'}`
+}
+
+function selectEventMarket(event: any, input: string, opts: ResolveMarketOptions): MarketInfo {
+  const markets = (event?.markets || [])
+    .filter((m: any) => !m.closed && m.active !== false)
+    .filter((m: any) => parseJsonArray(m.clobTokenIds).length >= 2)
+
+  if (!markets.length) throw new Error(`No tradable child markets found for event: "${input}"`)
+  if (markets.length === 1) return fmt(markets[0])
+
+  const hints = [opts.date, opts.hint].filter((v): v is string => Boolean(v))
+  if (hints.length) {
+    const ranked = markets
+      .map((market: any) => ({ market, score: searchScore(market, hints) }))
+      .sort((a: any, b: any) => b.score - a.score)
+    if (ranked[0]?.score > 0 && ranked[0].score > (ranked[1]?.score || 0)) return fmt(ranked[0].market)
+  }
+
+  throw new PolymarketEventSelectionError(
+    `That Polymarket event has multiple tradable markets. Pick one by passing a date/hint, for example date="June 30, 2026", or use one of these market IDs:\n\n` +
+    markets.map(formatMarketChoice).join('\n')
+  )
+}
+
+async function resolveMarket(input: string, opts: ResolveMarketOptions = {}): Promise<MarketInfo> {
+  const parsed = parseUrl(input)
+  const slug = parsed.slug
 
   // Try direct ID
-  try {
-    const m = await gammaGet(`/markets/${slug}`) as any
-    if (m?.id) return fmt(m)
-  } catch { /* search */ }
+  if (parsed.pageType !== 'event') {
+    try {
+      const m = await gammaGet(`/markets/${slug}`) as any
+      if (m?.id) return fmt(m)
+    } catch { /* search */ }
+  }
 
   // Search by slug
   try {
@@ -131,19 +208,41 @@ async function resolveMarket(input: string): Promise<MarketInfo> {
     if (r?.length) return fmt(r[0])
   } catch { /* text search */ }
 
+  // Event pages often contain several child markets. Resolve those instead of
+  // forcing users to know Polymarket's hidden child market IDs.
+  const events = await gammaGetOptional<any[]>(`/events?slug=${encodeURIComponent(slug)}&limit=1`, [])
+  if (events?.length) return selectEventMarket(events[0], input, opts)
+
+  const search = await gammaGetOptional<any>(`/public-search?q=${encodeURIComponent(slug)}&limit_per_type=10&events_status=active`, {})
+  const searchedMarkets = [
+    ...(search?.markets || []),
+    ...(search?.events || []).flatMap((event: any) => (event?.markets || []).map((market: any) => ({ ...market, eventTitle: event.title || event.question }))),
+  ].filter((m: any) => m?.id && !m.closed && m.active !== false)
+  if (searchedMarkets.length) {
+    const ranked = searchedMarkets
+      .map((market: any) => ({ market, score: searchScore(market, [slug, opts.date, opts.hint].filter(Boolean) as string[]) }))
+      .sort((a: any, b: any) => b.score - a.score)
+    if (ranked[0]?.score > 0) return fmt(ranked[0].market)
+  }
+
   // Text search fallback
-  const all = await gammaGet(`/markets?limit=20&active=true&closed=false&order=volume&ascending=false`) as any[]
-  const match = all?.find((m: any) =>
-    m.question?.toLowerCase().includes(slug.toLowerCase()) || m.id === slug
+  const [marketMatches, eventMatches, topMarkets] = await Promise.all([
+    gammaGetOptional<any[]>(`/markets?search=${encodeURIComponent(slug)}&limit=20&active=true&closed=false`, []),
+    gammaGetOptional<any[]>(`/events?search=${encodeURIComponent(slug)}&limit=10&active=true&closed=false`, []),
+    gammaGetOptional<any[]>(`/markets?limit=100&active=true&closed=false&order=volume&ascending=false`, []),
+  ])
+  const directMatch = [...marketMatches, ...topMarkets].find((m: any) =>
+    normalizeText(m.question).includes(normalizeText(slug)) || m.id === slug
   )
-  if (match) return fmt(match)
+  if (directMatch) return fmt(directMatch)
+  if (eventMatches?.length) return selectEventMarket(eventMatches[0], input, opts)
   throw new Error(`Market not found: "${input}"`)
 }
 
 function fmt(m: any): MarketInfo {
-  const prices = m.outcomePrices ? JSON.parse(m.outcomePrices) : [0.5, 0.5]
-  const tokens = m.clobTokenIds ? JSON.parse(m.clobTokenIds) : ['', '']
-  const outcomes = m.outcomes ? JSON.parse(m.outcomes) : ['Yes', 'No']
+  const prices = parseJsonArray(m.outcomePrices)
+  const tokens = parseJsonArray(m.clobTokenIds)
+  const outcomes = parseJsonArray(m.outcomes)
   return {
     id: m.id || m.condition_id, question: m.question || 'Unknown',
     tokenId: tokens[0] || '', noTokenId: tokens[1] || '',
@@ -151,7 +250,7 @@ function fmt(m: any): MarketInfo {
     yesPrice: parseFloat(prices[0] || '0.5'), noPrice: parseFloat(prices[1] || '0.5'),
     volume: parseFloat(m.volume || '0'), liquidity: parseFloat(m.liquidity || '0'),
     tickSize: (m.minimumTickSize || '0.01') as TickSize,
-    endDate: m.endDate || '', resolved: m.resolved || false, outcomes,
+    endDate: m.endDate || '', resolved: m.resolved || false, outcomes: outcomes.length ? outcomes : ['Yes', 'No'],
   }
 }
 
@@ -283,6 +382,8 @@ const TOOLS = [
         query: { type: 'string', description: 'Search query (for search, correlations)' },
         marketUrl: { type: 'string', description: 'Polymarket URL, slug, or ID' },
         marketId: { type: 'string', description: 'Market ID (alternative to marketUrl)' },
+        date: { type: 'string', description: 'Date or deadline hint for event pages with multiple child markets. Example: June 30, 2026' },
+        marketHint: { type: 'string', description: 'Plain-English child market hint for event pages. Example: June 30 one' },
         outcome: { type: 'string', enum: ['YES', 'NO'], description: 'Outcome to trade' },
         amount: { type: 'number', description: 'Polygon USDC to spend (buy) or shares to sell (sell)' },
         destination: { type: 'string', description: 'Destination address for withdrawal guidance' },
@@ -321,12 +422,37 @@ async function handle(name: string, args: Record<string, unknown>) {
           const blocker = getPolymarketSetupBlocker('approve', status)
           return text(formatPolymarketSetupGuide(status, blocker))
         }
-        const q = (args.query as string).toLowerCase()
+        const q = args.query as string
         const limit = Math.min((args.limit as number) || 10, 20)
 
-        const data = await gammaGet(`/markets?limit=50&active=true&closed=false&order=volume&ascending=false`) as any[]
-        const matches = (data || [])
-          .filter((m: any) => m.question?.toLowerCase().includes(q))
+        const [searchResults, marketResults, eventResults, fallbackMarkets] = await Promise.all([
+          gammaGetOptional<any>(`/public-search?q=${encodeURIComponent(q)}&limit_per_type=20&events_status=active`, {}),
+          gammaGetOptional<any[]>(`/markets?search=${encodeURIComponent(q)}&limit=50&active=true&closed=false`, []),
+          gammaGetOptional<any[]>(`/events?search=${encodeURIComponent(q)}&limit=20&active=true&closed=false`, []),
+          gammaGetOptional<any[]>(`/markets?limit=100&active=true&closed=false&order=volume&ascending=false`, []),
+        ])
+
+        const byId = new Map<string, any>()
+        for (const m of searchResults?.markets || []) if (m?.id) byId.set(String(m.id), m)
+        for (const event of searchResults?.events || []) {
+          for (const m of event?.markets || []) {
+            if (m?.id && !m.closed && m.active !== false) byId.set(String(m.id), { ...m, eventTitle: event.title || event.question })
+          }
+        }
+        for (const m of marketResults) if (m?.id) byId.set(String(m.id), m)
+        for (const event of eventResults) {
+          for (const m of event?.markets || []) {
+            if (m?.id && !m.closed && m.active !== false) byId.set(String(m.id), { ...m, eventTitle: event.title || event.question })
+          }
+        }
+        const normalizedQuery = normalizeText(q)
+        for (const m of fallbackMarkets) {
+          if (m?.id && normalizeText(m.question).includes(normalizedQuery)) byId.set(String(m.id), m)
+        }
+
+        const matches = [...byId.values()]
+          .filter((m: any) => searchScore(m, [q]) > 0)
+          .sort((a: any, b: any) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
           .slice(0, limit)
 
         if (!matches.length) return text(`No markets found for "${args.query}"`)
@@ -366,7 +492,10 @@ async function handle(name: string, args: Record<string, unknown>) {
       case 'market': {
         const input = (args.marketUrl || args.marketId) as string
         if (!input) return err('Provide marketUrl or marketId')
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
         return text(
           `📊 ${m.question}\n\n` +
           `YES: ${(m.yesPrice * 100).toFixed(1)}¢  |  NO: ${(m.noPrice * 100).toFixed(1)}¢\n` +
@@ -466,7 +595,10 @@ async function handle(name: string, args: Record<string, unknown>) {
         const setupGuide = await getSetupGuideIfBlocked('buy', amount)
         if (setupGuide) return text(setupGuide)
 
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
         const client = await getClient()
         const outcome = (args.outcome as string).toUpperCase()
         const tokenId = outcome === 'YES' ? m.tokenId : m.noTokenId
@@ -518,7 +650,10 @@ async function handle(name: string, args: Record<string, unknown>) {
         const setupGuide = await getSetupGuideIfBlocked('sell')
         if (setupGuide) return text(setupGuide)
 
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
         const client = await getClient()
         const outcome = (args.outcome as string).toUpperCase()
         const tokenId = outcome === 'YES' ? m.tokenId : m.noTokenId
@@ -574,7 +709,10 @@ async function handle(name: string, args: Record<string, unknown>) {
         if (!input || !args.outcome || !args.amount || !args.stopPrice)
           return err('Need marketUrl, outcome, amount (shares), and stopPrice')
 
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
         const client = await getClient()
         const outcome = (args.outcome as string).toUpperCase()
         const tokenId = outcome === 'YES' ? m.tokenId : m.noTokenId
@@ -607,7 +745,10 @@ async function handle(name: string, args: Record<string, unknown>) {
         if (!input || !args.outcome || !args.amount || !args.stopPrice)
           return err('Need marketUrl, outcome, amount (shares), and stopPrice (target)')
 
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
         const client = await getClient()
         const outcome = (args.outcome as string).toUpperCase()
         const tokenId = outcome === 'YES' ? m.tokenId : m.noTokenId
@@ -708,7 +849,10 @@ async function handle(name: string, args: Record<string, unknown>) {
       case 'orderbook': {
         const input = (args.marketUrl || args.marketId) as string
         if (!input) return err('Provide marketUrl or marketId')
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
         const client = await getClient()
         const book = await client.getOrderBook(m.tokenId)
         const asks = ((book as any).asks || []).slice(0, 5)
@@ -740,7 +884,10 @@ async function handle(name: string, args: Record<string, unknown>) {
       case 'redeem': {
         const input = (args.marketUrl || args.marketId) as string
         if (!input) return err('Provide marketUrl or marketId of a resolved market')
-        const m = await resolveMarket(input)
+        const m = await resolveMarket(input, {
+          date: args.date as string | undefined,
+          hint: args.marketHint as string | undefined,
+        })
 
         if (!m.resolved) {
           return text(

@@ -10,9 +10,10 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, resolve, isAbsolute } from 'path'
+import { randomUUID } from 'crypto'
 import { encrypt, decrypt, getPassphrase } from './crypto.js'
 
-const DEFAULT_PATH = process.env.AGNT_MEMORY_PATH || '.agnt/memory.enc'
+const DEFAULT_PATH = '.agnt/memory.enc'
 const MAX_MEMORIES = 5000
 const SAVE_DEBOUNCE_MS = 2000 // batch writes within 2s window
 
@@ -86,7 +87,7 @@ function removeFromIndex(idx: number) {
 // ─── Persistence ─────────────────────────────────────────
 
 function resolvePath(): string {
-  const p = DEFAULT_PATH
+  const p = process.env.AGNT_MEMORY_PATH || DEFAULT_PATH
   return isAbsolute(p) ? p : resolve(process.cwd(), p)
 }
 
@@ -250,7 +251,11 @@ export function recall(query: string, limit = 10): MemoryEntry[] {
 /**
  * Get trade history. Uses tag index for O(1) tag lookup.
  */
-export function getTradeHistory(limit = 20, type?: string): MemoryEntry[] {
+export function getTradeHistory(
+  limit = 20,
+  type?: string,
+  options: { walletAddress?: string; includeUnscoped?: boolean } = {},
+): MemoryEntry[] {
   ensure()
   const tradeKeywords = type
     ? [type.toLowerCase()]
@@ -273,8 +278,16 @@ export function getTradeHistory(limit = 20, type?: string): MemoryEntry[] {
     }
   }
 
+  const walletTag = options.walletAddress ? `wallet:${options.walletAddress.toLowerCase()}` : undefined
+
   return [...seen]
     .map(idx => _entries[idx])
+    .filter(entry => {
+      if (!walletTag) return true
+      const tags = entry.tags.map(tag => tag.toLowerCase())
+      if (tags.includes(walletTag)) return true
+      return Boolean(options.includeUnscoped && !tags.some(tag => tag.startsWith('wallet:')))
+    })
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, limit)
 }
@@ -396,10 +409,15 @@ export function recallByTag(tag: string, query: string, limit = 10): MemoryEntry
 
 // ─── Auto-Recording ──────────────────────────────────────
 
-export function autoRemember(toolName: string, args: Record<string, unknown>, resultSnippet: string) {
+export function autoRemember(
+  toolName: string,
+  args: Record<string, unknown>,
+  resultSnippet: string,
+  context: { walletName?: string; walletAddress?: string } = {},
+) {
   const action = (args.action as string) || 'unknown'
   const timestamp = new Date().toISOString()
-  const key = `${toolName}:${action}:${timestamp.slice(0, 19)}`
+  const key = `${toolName}:${action}:${timestamp.slice(0, 19)}:${randomUUID().slice(0, 8)}`
 
   let value = `${toolName} ${action}`
   const relevantArgs = Object.entries(args)
@@ -418,6 +436,12 @@ export function autoRemember(toolName: string, args: Record<string, unknown>, re
   if (['lido', 'eigenlayer', 'pendle', 'ethena', 'ondo'].includes(toolName)) tags.push('yield')
   if (['payment'].includes(toolName)) tags.push('payment')
   if (['polymarket'].includes(toolName)) tags.push('prediction')
+  if (context.walletAddress) tags.push(`wallet:${context.walletAddress.toLowerCase()}`)
+  if (context.walletName) tags.push(`wallet_name:${context.walletName.toLowerCase()}`)
+
+  if (context.walletAddress) {
+    value += ` | wallet=${context.walletName || 'active'} (${context.walletAddress})`
+  }
 
   try { rememberFact(key, value, tags, toolName) } catch { /* silent */ }
 }

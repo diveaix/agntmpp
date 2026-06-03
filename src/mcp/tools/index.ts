@@ -67,6 +67,7 @@ import { isSessionCached, cacheSession, recordPayment, recordCall } from '../pay
 import { autoRemember } from '../memory.js'
 import { recordToolActivity } from '../activity-log.js'
 import { formatTxError } from '../tx-errors.js'
+import { getActiveWallet } from '../wallet.js'
 
 const MODULES: ToolModule[] = [
 
@@ -240,7 +241,11 @@ async function execTool(name: string, args: Record<string, unknown>, auth?: Auth
       if (isWriteAction(name, args) && !result.isError) {
         try {
           const snippet = result.content.map((c) => c.text).join(' ').slice(0, 200)
-          autoRemember(name, args, snippet)
+          const activeWallet = getActiveWallet()
+          autoRemember(name, args, snippet, activeWallet ? {
+            walletName: activeWallet.name,
+            walletAddress: activeWallet.address,
+          } : {})
         } catch { /* never crash on memory recording */ }
       }
       return result

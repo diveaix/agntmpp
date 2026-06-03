@@ -17,6 +17,7 @@ import {
   flushMemory,
   type MemoryEntry,
 } from '../memory.js'
+import { getActiveWallet } from '../wallet.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -43,6 +44,7 @@ const TOOLS = [
         tag: { type: 'string', description: 'Filter by tag (for list, recall, bulk_forget)' },
         limit: { type: 'number', description: 'Max results. Default: 10' },
         type: { type: 'string', description: 'Filter: swap, bridge, lending, perps, yield (for history)' },
+        scope: { type: 'string', enum: ['active_wallet', 'all'], description: 'History scope. Default: active_wallet' },
       },
       required: ['action'],
     },
@@ -100,10 +102,26 @@ async function handle(name: string, args: Record<string, unknown>) {
 
       case 'history': {
         const limit = (args.limit as number) || 20
-        const history = getTradeHistory(limit, args.type as string | undefined)
-        if (!history.length) return text('No trade history yet.')
+        const scope = (args.scope as string | undefined) || 'active_wallet'
+        const activeWallet = getActiveWallet()
+        if (scope !== 'all' && !activeWallet) {
+          return text('No active wallet selected, so I cannot show wallet-specific trade history. Select or create a wallet first, or use scope="all" to inspect unscoped legacy memory.')
+        }
+        const history = getTradeHistory(limit, args.type as string | undefined, scope === 'all' ? {} : {
+          walletAddress: activeWallet?.address,
+        })
+        if (!history.length) {
+          return text(scope === 'all'
+            ? 'No trade history yet.'
+            : `No trade history found for the active wallet ${activeWallet?.name} (${activeWallet?.address}).`)
+        }
 
         const lines = [`📊 Trade History — ${history.length} entries:\n`]
+        if (scope !== 'all') {
+          lines.push(`Wallet: ${activeWallet?.name} (${activeWallet?.address})`)
+          lines.push('Legacy entries without wallet metadata are hidden here.')
+          lines.push('')
+        }
         history.forEach((m, i) => { lines.push(fmtEntry(m, i)); lines.push('') })
         return text(lines.join('\n'))
       }
