@@ -13,6 +13,13 @@ export interface PolymarketSetupStatus {
   walletName?: string
   address?: string
   pusdBalance?: string | number
+  funderAddress?: string
+  signatureType?: number
+  accountMode?: string
+  usesSeparateFunder?: boolean
+  funderPusdBalance?: string | number
+  tradingBalance?: string | number
+  tradingAllowance?: string | number
   requiredPusd?: number
   polBalance?: string | number
   collateralReady?: boolean
@@ -77,9 +84,11 @@ export function getPolymarketSetupBlocker(action: string, status: PolymarketSetu
   if (['search', 'markets', 'market', 'orderbook'].includes(action)) return null
   if (!status.hasWallet) return 'wallet'
 
-  const pusdBalance = numericBalance(status.pusdBalance)
-  if (action === 'buy' && pusdBalance <= 0) return 'funding'
-  if (action === 'buy' && status.requiredPusd !== undefined && pusdBalance < status.requiredPusd) return 'funding'
+  const spendableBalance = status.tradingBalance !== undefined
+    ? numericBalance(status.tradingBalance)
+    : numericBalance(status.pusdBalance)
+  if (action === 'buy' && spendableBalance <= 0) return 'funding'
+  if (action === 'buy' && status.requiredPusd !== undefined && spendableBalance < status.requiredPusd) return 'funding'
 
   const needsBuyApproval = action === 'buy' && !status.collateralReady
   const needsSellApproval = action === 'sell' && !status.outcomeTokensReady
@@ -124,9 +133,13 @@ export function formatPolymarketSetupGuide(status: PolymarketSetupStatus = { has
   lines.push('Current status:')
   if (status.hasWallet) {
     lines.push(`  Wallet: ${status.walletName || 'Active'} (${status.address || 'address unavailable'})`)
-    lines.push(`  Polygon USDC: ${status.pusdBalance ?? 'unknown'}`)
+    lines.push(`  Account mode: ${status.accountMode || 'direct wallet'}${status.signatureType !== undefined ? ` (signature type ${status.signatureType})` : ''}`)
+    lines.push(`  Trading/funder address: ${status.funderAddress || status.address || 'unknown'}`)
+    lines.push(`  Polymarket trading USDC: ${status.tradingBalance ?? 'unknown'}`)
+    lines.push(`  Wallet Polygon USDC: ${status.pusdBalance ?? 'unknown'}`)
+    if (status.usesSeparateFunder) lines.push(`  Funder wallet Polygon USDC: ${status.funderPusdBalance ?? 'unknown'}`)
     lines.push(`  POL for one-time setup gas: ${status.polBalance ?? 'unknown'}`)
-    lines.push(`  Polygon USDC approvals: ${status.collateralReady ? 'Ready' : 'Needs approval'}`)
+    lines.push(`  Polymarket USDC allowance: ${status.collateralReady ? 'Ready' : 'Needs sync/approval'}`)
     lines.push(`  Outcome token approvals: ${status.outcomeTokensReady ? 'Ready' : 'Needs approval'}`)
   } else {
     lines.push('  Wallet: not selected')
@@ -136,14 +149,15 @@ export function formatPolymarketSetupGuide(status: PolymarketSetupStatus = { has
     '',
     'What to do first:',
     '  1. Make sure you have a wallet selected.',
-    '  2. Add Polygon USDC. This is the money used to buy shares.',
+    '  2. Fund the trading/funder address with Polygon USDC. This is the money used to buy shares.',
     '  3. Keep a little POL on Polygon. This is only for the first approval step.',
     '  4. Approve Polymarket once. After that, normal buy/sell orders are quick.',
     '',
     'Funding and withdrawals:',
-    '  Funding: use the Deposit button in the Polymarket app to move Polygon USDC into your Polymarket trading balance.',
-    '  This MCP tool can check your wallet setup, but it cannot create a Polymarket deposit route or deposit address yet.',
-    '  If your wallet has Polygon USDC but Polymarket trading balance is 0, deposit through the Polymarket app first.',
+    '  Funding: ask "show my Polymarket deposit address" to see the exact address this tool will trade from.',
+    '  In hosted AGNT, each user/API key must configure their own Polymarket funder/deposit address. Do not use a shared server-wide funder.',
+    '  If your own separate deposit/funder wallet is configured, this tool can transfer Polygon USDC from your active wallet to that address.',
+    '  After funding, run "sync Polymarket balance" so the CLOB sees the latest balance and allowance.',
     '  Withdrawal: withdraw USDC from Polymarket to a wallet or exchange address that supports Polygon USDC.',
     '  Polymarket does not charge its own deposit or withdrawal fee, but wallets, bridges, exchanges, or providers may charge network or route fees.',
     '  This tool can guide withdrawals, but live Polymarket withdrawal execution is not wired here yet.',

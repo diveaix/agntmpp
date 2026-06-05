@@ -7,12 +7,17 @@
  */
 
 import type { ToolModule } from './index.js'
-import { ClobClient, Side, OrderType, type TickSize } from '@polymarket/clob-client-v2'
-import { createWalletClient, createPublicClient, http, parseAbi, encodeFunctionData, formatUnits, maxUint256 } from 'viem'
+import { AssetType, ClobClient, Side, SignatureTypeV2, OrderType, type TickSize } from '@polymarket/clob-client-v2'
+import { createWalletClient, createPublicClient, http, parseAbi, encodeFunctionData, formatUnits, maxUint256, parseUnits } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { polygon } from 'viem/chains'
+import { createHash } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, isAbsolute, resolve } from 'path'
 import { getActiveWallet } from '../wallet.js'
 import { SUPPORTED_CHAINS } from '../chains.js'
+import { decrypt, encrypt, getPassphrase } from '../crypto.js'
+import { getCurrentWalletScope } from '../tool-context.js'
 import {
   calculateLimitBuySize,
   formatPolymarketSetupGuide,
@@ -50,6 +55,7 @@ const erc20Abi = parseAbi([
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)',
   'function approve(address,uint256) returns (bool)',
+  'function transfer(address,uint256) returns (bool)',
 ])
 
 const erc1155Abi = parseAbi([
@@ -60,14 +66,121 @@ const erc1155Abi = parseAbi([
 // ─── Client singleton ────────────────────────────────────
 
 let _client: ClobClient | null = null
-let _clientAddr: string | null = null
+let _clientKey: string | null = null
+
+interface PolymarketAccountConfig {
+  signatureType: SignatureTypeV2
+  signerAddress: `0x${string}`
+  funderAddress: `0x${string}`
+  modeLabel: string
+  usesSeparateFunder: boolean
+}
+
+interface StoredPolymarketAccountConfig {
+  signatureType?: number | string
+  funderAddress?: string
+  updatedAt?: string
+}
+
+function resolveGlobalConfigPath(custom?: string): string {
+  const p = custom || process.env.AGNT_POLYMARKET_CONFIG_PATH || '.agnt/polymarket.enc'
+  return isAbsolute(p) ? p : resolve(process.cwd(), p)
+}
+
+function resolveConfigPath(custom?: string): string {
+  if (!custom) {
+    const scope = getCurrentWalletScope()
+    if (scope) {
+      const safeScope = createHash('sha256').update(scope, 'utf8').digest('hex').slice(0, 32)
+      const baseDir = process.env.AGNT_POLYMARKET_CONFIG_DIR
+        ? (isAbsolute(process.env.AGNT_POLYMARKET_CONFIG_DIR) ? process.env.AGNT_POLYMARKET_CONFIG_DIR : resolve(process.cwd(), process.env.AGNT_POLYMARKET_CONFIG_DIR))
+        : resolve(dirname(resolveGlobalConfigPath(process.env.AGNT_POLYMARKET_CONFIG_PATH)), 'polymarket')
+      return resolve(baseDir, `${safeScope}.enc`)
+    }
+  }
+  return resolveGlobalConfigPath(custom)
+}
+
+function loadStoredPolymarketConfig(custom?: string): StoredPolymarketAccountConfig {
+  const fp = resolveConfigPath(custom)
+  if (!existsSync(fp)) return {}
+  try {
+    const raw = readFileSync(fp, 'utf-8')
+    const json = raw.trim().startsWith('{') ? raw : decrypt(raw, getPassphrase())
+    return JSON.parse(json) as StoredPolymarketAccountConfig
+  } catch {
+    return {}
+  }
+}
+
+function saveStoredPolymarketConfig(config: StoredPolymarketAccountConfig, custom?: string): StoredPolymarketAccountConfig {
+  const fp = resolveConfigPath(custom)
+  const dir = dirname(fp)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const saved = { ...config, updatedAt: new Date().toISOString() }
+  writeFileSync(fp, encrypt(JSON.stringify(saved, null, 2), getPassphrase()), 'utf-8')
+  _client = null
+  _clientKey = null
+  return saved
+}
+
+function parseSignatureType(value: unknown): SignatureTypeV2 {
+  const raw = String(value ?? '').trim()
+  if (!raw) return SignatureTypeV2.EOA
+  const normalized = raw.toLowerCase()
+  if (normalized === 'eoa' || normalized === '0') return SignatureTypeV2.EOA
+  if (normalized === 'proxy' || normalized === 'poly_proxy' || normalized === '1') return SignatureTypeV2.POLY_PROXY
+  if (normalized === 'safe' || normalized === 'gnosis' || normalized === 'poly_gnosis_safe' || normalized === '2') return SignatureTypeV2.POLY_GNOSIS_SAFE
+  if (normalized === 'deposit' || normalized === 'deposit_wallet' || normalized === 'poly_1271' || normalized === '1271' || normalized === '3') return SignatureTypeV2.POLY_1271
+  throw new Error('Invalid AGNT_POLYMARKET_SIGNATURE_TYPE. Use 0/eoa, 1/proxy, 2/safe, or 3/deposit.')
+}
+
+function getPolymarketAccountConfig(signerAddress: `0x${string}`): PolymarketAccountConfig {
+  const stored = loadStoredPolymarketConfig()
+  const signatureType = parseSignatureType(stored.signatureType ?? process.env.AGNT_POLYMARKET_SIGNATURE_TYPE)
+  const configuredFunder = (
+    stored.funderAddress ||
+    process.env.AGNT_POLYMARKET_FUNDER_ADDRESS ||
+    process.env.AGNT_POLYMARKET_DEPOSIT_WALLET_ADDRESS ||
+    ''
+  ).trim()
+  const funderAddress = (configuredFunder || signerAddress) as `0x${string}`
+  const modeLabel = signatureType === SignatureTypeV2.POLY_1271
+    ? 'deposit wallet'
+    : signatureType === SignatureTypeV2.POLY_PROXY
+      ? 'Polymarket proxy wallet'
+      : signatureType === SignatureTypeV2.POLY_GNOSIS_SAFE
+        ? 'Polymarket safe'
+        : 'direct wallet'
+
+  return {
+    signatureType,
+    signerAddress,
+    funderAddress,
+    modeLabel,
+    usesSeparateFunder: funderAddress.toLowerCase() !== signerAddress.toLowerCase(),
+  }
+}
+
+function formatClobUsdc(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  try {
+    return formatUnits(BigInt(String(value)), 6)
+  } catch {
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? String(numeric) : undefined
+  }
+}
 
 async function getClient(): Promise<ClobClient> {
   const w = getActiveWallet()
   if (!w) throw new Error('No active wallet. Create one with the wallet tool first.')
-  if (_client && _clientAddr === w.address) return _client
 
   const account = privateKeyToAccount(w.privateKey as `0x${string}`)
+  const cfg = getPolymarketAccountConfig(account.address)
+  const clientKey = `${account.address.toLowerCase()}:${cfg.funderAddress.toLowerCase()}:${cfg.signatureType}`
+  if (_client && _clientKey === clientKey) return _client
+
   const signer = createWalletClient({ account, chain: polygon, transport: http(POLYGON_RPC) })
 
   const k = process.env.AGNT_POLYMARKET_KEY
@@ -78,15 +191,21 @@ async function getClient(): Promise<ClobClient> {
   if (k && s && p) {
     creds = { key: k, secret: s, passphrase: p }
   } else {
-    const tmp = new ClobClient({ host: HOST, chain: CHAIN_ID, signer })
+    const tmp = new ClobClient({
+      host: HOST,
+      chain: CHAIN_ID,
+      signer,
+      signatureType: cfg.signatureType,
+      funderAddress: cfg.funderAddress,
+    })
     creds = await tmp.createOrDeriveApiKey()
   }
 
   _client = new ClobClient({
     host: HOST, chain: CHAIN_ID, signer, creds,
-    signatureType: 0, funderAddress: account.address,
+    signatureType: cfg.signatureType, funderAddress: cfg.funderAddress,
   })
-  _clientAddr = w.address
+  _clientKey = clientKey
   return _client
 }
 
@@ -265,8 +384,11 @@ function getPolygonWallet() {
 
 async function getReadiness() {
   const { w, account, pub } = getPolygonWallet()
-  const [pusdBalance, polBalance, pusdAllowances, outcomeApprovals] = await Promise.all([
+  const cfg = getPolymarketAccountConfig(account.address)
+  const client = await getClient()
+  const [pusdBalance, funderPusdBalance, polBalance, pusdAllowances, outcomeApprovals, clobCollateral] = await Promise.all([
     pub.readContract({ address: PUSD_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] }) as Promise<bigint>,
+    pub.readContract({ address: PUSD_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [cfg.funderAddress] }) as Promise<bigint>,
     pub.getBalance({ address: account.address }),
     Promise.all(PUSD_SPENDERS.map(async spender => ({
       ...spender,
@@ -286,16 +408,29 @@ async function getReadiness() {
         args: [account.address, operator.address as `0x${string}`],
       }) as boolean,
     }))),
+    client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL }).catch(() => null),
   ])
+
+  const clobBalance = formatClobUsdc((clobCollateral as any)?.balance)
+  const clobAllowance = formatClobUsdc((clobCollateral as any)?.allowance)
+  const clobAllowanceReady = Number.parseFloat(clobAllowance || '0') > 0
+  const walletAllowanceReady = pusdAllowances.every(item => item.allowance >= BigInt(1e12))
 
   return {
     wallet: w,
     address: account.address,
+    funderAddress: cfg.funderAddress,
+    signatureType: cfg.signatureType,
+    modeLabel: cfg.modeLabel,
+    usesSeparateFunder: cfg.usesSeparateFunder,
     pusdBalance,
+    funderPusdBalance,
     polBalance,
+    clobBalance,
+    clobAllowance,
     pusdAllowances,
     outcomeApprovals,
-    collateralReady: pusdAllowances.every(item => item.allowance >= BigInt(1e12)),
+    collateralReady: clobAllowanceReady || walletAllowanceReady,
     outcomeTokensReady: outcomeApprovals.every(item => item.approved),
   }
 }
@@ -308,6 +443,13 @@ export async function getPolymarketSetupStatus(requiredPusd?: number): Promise<P
       walletName: readiness.wallet.name,
       address: readiness.address,
       pusdBalance: formatUnits(readiness.pusdBalance, 6),
+      funderAddress: readiness.funderAddress,
+      signatureType: readiness.signatureType,
+      accountMode: readiness.modeLabel,
+      usesSeparateFunder: readiness.usesSeparateFunder,
+      funderPusdBalance: formatUnits(readiness.funderPusdBalance, 6),
+      tradingBalance: readiness.clobBalance,
+      tradingAllowance: readiness.clobAllowance,
       requiredPusd,
       polBalance: formatUnits(readiness.polBalance, 18),
       collateralReady: readiness.collateralReady,
@@ -321,8 +463,14 @@ export async function getPolymarketSetupStatus(requiredPusd?: number): Promise<P
 }
 
 async function getSetupGuideIfBlocked(action: string, requiredPusd?: number): Promise<string | null> {
-  const status = await getPolymarketSetupStatus(requiredPusd)
-  const blocker = getPolymarketSetupBlocker(action, status)
+  let status = await getPolymarketSetupStatus(requiredPusd)
+  let blocker = getPolymarketSetupBlocker(action, status)
+  const funderHasEnough = Number.parseFloat(String(status.funderPusdBalance || '0')) >= (requiredPusd || 0)
+  if (action === 'buy' && blocker === 'funding' && funderHasEnough) {
+    await syncPolymarketBalanceAllowance().catch(() => undefined)
+    status = await getPolymarketSetupStatus(requiredPusd)
+    blocker = getPolymarketSetupBlocker(action, status)
+  }
   if (!blocker) return null
   return formatPolymarketSetupGuide(status, blocker)
 }
@@ -331,6 +479,12 @@ async function getSetupGuideIfBlocked(action: string, requiredPusd?: number): Pr
 
 async function ensureApproval(): Promise<string> {
   const { account, pub, wallet } = getPolygonWallet()
+  const client = await getClient()
+  const cfg = getPolymarketAccountConfig(account.address)
+  if (cfg.usesSeparateFunder) {
+    const sync = await syncPolymarketBalanceAllowance()
+    return `${sync}\n\nThis setup uses a separate ${cfg.modeLabel} as the Polymarket funder. AGNT did not approve the active signer wallet, because orders spend from ${cfg.funderAddress}. If CLOB allowance is still 0, the funder/deposit wallet needs to be initialized or approved through Polymarket's wallet/relayer flow.`
+  }
   const approvals: string[] = []
 
   for (const spender of PUSD_SPENDERS) {
@@ -362,7 +516,131 @@ async function ensureApproval(): Promise<string> {
       approvals.push(`Approved outcome tokens for ${operator.label} (tx: ${hash.slice(0, 14)}...)`)
     }
   }
+  await client.updateBalanceAllowance({ asset_type: AssetType.COLLATERAL })
+  approvals.push('Synced Polymarket CLOB USDC balance and allowance')
   return approvals.length ? approvals.join('\n') : 'Polygon USDC and outcome-token approvals are already ready'
+}
+
+async function syncPolymarketBalanceAllowance(tokenId?: string): Promise<string> {
+  const client = await getClient()
+  await client.updateBalanceAllowance({ asset_type: AssetType.COLLATERAL })
+  if (tokenId) {
+    await client.updateBalanceAllowance({ asset_type: AssetType.CONDITIONAL, token_id: tokenId })
+  }
+  const collateral = await client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL })
+  return `Synced Polymarket CLOB.\nTrading USDC: ${formatClobUsdc((collateral as any).balance) ?? 'unknown'}\nUSDC allowance: ${formatClobUsdc((collateral as any).allowance) ?? 'unknown'}`
+}
+
+async function fundPolymarket(amount?: number): Promise<string> {
+  const { account, pub, wallet } = getPolygonWallet()
+  const cfg = getPolymarketAccountConfig(account.address)
+
+  const lines = [
+    'Polymarket Funding',
+    '',
+    `Active wallet: ${account.address}`,
+    `Trading/funder address: ${cfg.funderAddress}`,
+    `Mode: ${cfg.modeLabel} (signature type ${cfg.signatureType})`,
+  ]
+
+  if (!amount) {
+    lines.push(
+      '',
+      'How to fund:',
+      `  Send Polygon USDC to: ${cfg.funderAddress}`,
+      '  Then run polymarket action=sync so the CLOB sees the new balance.',
+    )
+    if (!cfg.usesSeparateFunder) {
+      lines.push('', 'This setup uses your active wallet as the trading address, so no internal transfer is needed.')
+    }
+    return lines.join('\n')
+  }
+
+  if (!cfg.usesSeparateFunder) {
+    lines.push(
+      '',
+      'No transfer sent.',
+      'This setup already uses the active wallet as the Polymarket trading address. Run polymarket action=approve or polymarket action=sync instead.',
+    )
+    return lines.join('\n')
+  }
+
+  const rawAmount = parseUnits(String(amount), 6)
+  const balance = await pub.readContract({
+    address: PUSD_POLYGON as `0x${string}`,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: [account.address],
+  }) as bigint
+  if (balance < rawAmount) {
+    throw new Error(`Insufficient Polygon USDC in active wallet. Need ${amount}, available ${formatUnits(balance, 6)}.`)
+  }
+
+  const hash = await wallet.sendTransaction({
+    to: PUSD_POLYGON as `0x${string}`,
+    data: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [cfg.funderAddress, rawAmount],
+    }),
+  })
+  await pub.waitForTransactionReceipt({ hash })
+  await syncPolymarketBalanceAllowance()
+
+  lines.push(
+    '',
+    `Sent ${amount} Polygon USDC to the Polymarket trading/funder address.`,
+    `Tx: https://polygonscan.com/tx/${hash}`,
+    '',
+    'CLOB balance sync requested. If the CLOB still shows the old balance, wait a few seconds and run polymarket action=sync again.',
+  )
+  return lines.join('\n')
+}
+
+function configurePolymarket(args: Record<string, unknown>): string {
+  const signatureTypeInput = args.signatureType ?? args.accountMode ?? args.mode
+  const funderAddress = String(args.funderAddress || args.depositAddress || args.depositWalletAddress || '').trim()
+  const signatureType = parseSignatureType(signatureTypeInput ?? (funderAddress ? 'deposit' : 'eoa'))
+
+  if (signatureType !== SignatureTypeV2.EOA && !funderAddress) {
+    throw new Error('A separate Polymarket funder/deposit address is required for proxy, safe, or deposit wallet mode.')
+  }
+  if (funderAddress && !/^0x[a-fA-F0-9]{40}$/.test(funderAddress)) {
+    throw new Error('Invalid Polymarket funder/deposit address.')
+  }
+
+  const saved = saveStoredPolymarketConfig({
+    signatureType,
+    funderAddress: funderAddress || undefined,
+  })
+
+  return [
+    'Polymarket config saved for this AGNT user/scope.',
+    '',
+    `Signature type: ${saved.signatureType}`,
+    `Funder/deposit address: ${saved.funderAddress || 'active wallet'}`,
+    '',
+    'Next:',
+    '  1. Run polymarket action=balance',
+    '  2. Fund the shown trading/funder address with Polygon USDC',
+    '  3. Run polymarket action=sync',
+  ].join('\n')
+}
+
+function showPolymarketConfig(): string {
+  const stored = loadStoredPolymarketConfig()
+  const w = getActiveWallet()
+  const cfg = w ? getPolymarketAccountConfig(w.address) : null
+  return [
+    'Polymarket Config',
+    '',
+    `Stored signature type: ${stored.signatureType ?? 'not set'}`,
+    `Stored funder/deposit address: ${stored.funderAddress || 'not set'}`,
+    `Effective mode: ${cfg?.modeLabel || 'unknown until wallet selected'}`,
+    `Effective trading/funder address: ${cfg?.funderAddress || 'unknown until wallet selected'}`,
+    '',
+    'Note: env vars are only fallback defaults. Hosted AGNT users should configure this per API key/user scope.',
+  ].join('\n')
 }
 
 // ─── Tool Definition ─────────────────────────────────────
@@ -376,12 +654,17 @@ const TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['search', 'markets', 'market', 'setup', 'guide', 'help', 'balance', 'withdraw', 'buy', 'sell', 'positions', 'pnl', 'orders', 'cancel', 'orderbook', 'approve', 'stop_loss', 'take_profit', 'redeem', 'copy_trade', 'batch_buy', 'correlations', 'history', 'heatmap'],
+          enum: ['search', 'markets', 'market', 'setup', 'guide', 'help', 'configure', 'config', 'clear_config', 'balance', 'deposit', 'fund', 'sync', 'withdraw', 'buy', 'sell', 'positions', 'pnl', 'orders', 'cancel', 'orderbook', 'approve', 'stop_loss', 'take_profit', 'redeem', 'copy_trade', 'batch_buy', 'correlations', 'history', 'heatmap'],
           description: 'Action to perform',
         },
         query: { type: 'string', description: 'Search query (for search, correlations)' },
         marketUrl: { type: 'string', description: 'Polymarket URL, slug, or ID' },
         marketId: { type: 'string', description: 'Market ID (alternative to marketUrl)' },
+        tokenId: { type: 'string', description: 'CLOB token ID for conditional token allowance sync' },
+        signatureType: { type: 'string', description: 'Polymarket signature type: 0/eoa, 1/proxy, 2/safe, 3/deposit' },
+        accountMode: { type: 'string', description: 'Polymarket account mode: eoa, proxy, safe, or deposit' },
+        funderAddress: { type: 'string', description: 'Per-user Polymarket funder/deposit wallet address' },
+        depositAddress: { type: 'string', description: 'Alias for funderAddress' },
         date: { type: 'string', description: 'Date or deadline hint for event pages with multiple child markets. Example: June 30, 2026' },
         marketHint: { type: 'string', description: 'Plain-English child market hint for event pages. Example: June 30 one' },
         outcome: { type: 'string', enum: ['YES', 'NO'], description: 'Outcome to trade' },
@@ -518,6 +801,19 @@ async function handle(name: string, args: Record<string, unknown>) {
         return text(formatPolymarketSetupGuide(status, blocker))
       }
 
+      case 'configure': {
+        return text(configurePolymarket(args))
+      }
+
+      case 'config': {
+        return text(showPolymarketConfig())
+      }
+
+      case 'clear_config': {
+        saveStoredPolymarketConfig({})
+        return text('Polymarket config cleared for this AGNT user/scope. Env fallback may still apply if set on the server.')
+      }
+
       // ── Balance / readiness ──────────────────────────
       case 'balance': {
         const setupGuide = await getSetupGuideIfBlocked('balance')
@@ -546,8 +842,13 @@ async function handle(name: string, args: Record<string, unknown>) {
         return text(
           `Polymarket Readiness\n\n` +
           `Wallet: ${readiness.wallet.name} (${readiness.address})\n` +
+          `Account Mode: ${readiness.modeLabel} (signature type ${readiness.signatureType})\n` +
+          `Trading/Funder Address: ${readiness.funderAddress}\n` +
           `Network: Polygon\n` +
-          `Polygon USDC: ${formatUnits(readiness.pusdBalance, 6)}\n` +
+          `Polymarket Trading USDC: ${readiness.clobBalance ?? 'unknown'}\n` +
+          `CLOB USDC Allowance: ${readiness.clobAllowance ?? 'unknown'}\n` +
+          `Active Wallet Polygon USDC: ${formatUnits(readiness.pusdBalance, 6)}\n` +
+          `Funder Wallet Polygon USDC: ${formatUnits(readiness.funderPusdBalance, 6)}\n` +
           `POL: ${formatUnits(readiness.polBalance, 18)}\n` +
           `Open Orders: ${openOrders.length}\n\n` +
           `Polygon USDC Permissions:\n${polygonUsdcPermissionLines}\n\n` +
@@ -555,6 +856,17 @@ async function handle(name: string, args: Record<string, unknown>) {
           `${ready ? 'Ready to place buy and sell orders.' : 'Run polymarket action=setup for first-time setup, then action=approve before trading.'}\n` +
           `Note: approval is a one-time wallet permission. It uses POL gas, but normal buy/sell order placement does not use wallet gas after setup.`
         )
+      }
+
+      case 'deposit':
+      case 'fund': {
+        const setupGuide = await getSetupGuideIfBlocked('fund')
+        if (setupGuide) return text(setupGuide)
+        return text(await fundPolymarket(args.amount as number | undefined))
+      }
+
+      case 'sync': {
+        return text(await syncPolymarketBalanceAllowance(args.tokenId as string | undefined))
       }
 
       case 'withdraw': {
