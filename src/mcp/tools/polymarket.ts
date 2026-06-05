@@ -182,6 +182,19 @@ function formatClobUsdc(value: unknown): string | undefined {
   }
 }
 
+function formatPolymarketError(e: unknown): string {
+  if (e instanceof Error) {
+    const data = (e as any).data || (e as any).response?.data
+    const apiError = typeof data?.error === 'string' ? data.error : ''
+    return apiError ? `${e.message}: ${apiError}` : e.message
+  }
+  if (typeof e === 'object' && e !== null) {
+    const data = (e as any).data || (e as any).response?.data
+    if (typeof data?.error === 'string') return data.error
+  }
+  return String(e)
+}
+
 async function getPolymarketBridgeDepositAddress(recipient: `0x${string}`): Promise<string> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   const builderCode = process.env.POLYMARKET_BUILDER_CODE || process.env.AGNT_POLYMARKET_BUILDER_CODE
@@ -1621,7 +1634,14 @@ async function handle(name: string, args: Record<string, unknown>) {
         return err(`Unknown action: ${args.action}`)
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = formatPolymarketError(e)
+    if (/trading restricted|geoblock|restricted in your region/i.test(msg)) {
+      return err(
+        `Polymarket blocked this live trade because the CLOB says trading is restricted in the server/account region.\n\n` +
+        `Raw CLOB error: ${msg}\n\n` +
+        `This is not a wallet balance issue. Funding and order signing reached the CLOB, but Polymarket refused execution. Use a Polymarket-supported environment/account, or trade directly from a supported setup that complies with Polymarket's rules.`
+      )
+    }
     if (msg.includes('allowance') || msg.includes('approve')) {
       return err(`${msg}\n\n💡 Run: polymarket approve — to auto-approve Polymarket pUSD and outcome tokens for trading.`)
     }
