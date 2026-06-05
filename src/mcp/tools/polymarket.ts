@@ -195,6 +195,15 @@ function formatPolymarketError(e: unknown): string {
   return String(e)
 }
 
+function assertPolymarketOrderPosted(order: unknown): void {
+  if (!order || typeof order !== 'object') return
+  const status = Number((order as any).status)
+  const message = String((order as any).error || (order as any).message || '')
+  if (status >= 400 || message) {
+    throw new Error(message ? `Polymarket CLOB order failed with status ${status || 'unknown'}: ${message}` : `Polymarket CLOB order failed with status ${status}`)
+  }
+}
+
 async function getPolymarketBridgeDepositAddress(recipient: `0x${string}`): Promise<string> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   const builderCode = process.env.POLYMARKET_BUILDER_CODE || process.env.AGNT_POLYMARKET_BUILDER_CODE
@@ -1058,6 +1067,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             OrderType.GTC,
           )
         }
+        assertPolymarketOrderPosted(order)
 
         return text(
           `✅ BUY Order Placed\n\n` +
@@ -1119,6 +1129,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             { tickSize: m.tickSize, negRisk: m.negRisk },
             OrderType.GTC,
           )
+        assertPolymarketOrderPosted(order)
 
         return text(
           `✅ SELL Order Placed\n\n` +
