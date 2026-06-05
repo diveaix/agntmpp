@@ -31,8 +31,11 @@ import {
 const HOST = 'https://clob.polymarket.com'
 const CHAIN_ID = 137
 const GAMMA_API = 'https://gamma-api.polymarket.com'
+const POLYMARKET_BRIDGE_API = 'https://bridge.polymarket.com'
 const POLYGON_RPC = process.env.AGNT_POLYGON_RPC_URL || SUPPORTED_CHAINS.polygon.rpc
 const PUSD_POLYGON = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB'
+const NATIVE_USDC_POLYGON = '0x3c499c542cef5e3811E1192ce70d8cC03d5c3359'
+const USDC_E_POLYGON = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
 const CONDITIONAL_TOKENS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'
 const CTF_EXCHANGE = '0xE111180000d2663C0091e4f400237545B87B996B'
 const NEG_RISK_EXCHANGE = '0xe2222d279d744050d28e00520010520000310F59'
@@ -80,6 +83,13 @@ interface StoredPolymarketAccountConfig {
   signatureType?: number | string
   funderAddress?: string
   updatedAt?: string
+}
+
+interface PolymarketBridgeDepositResponse {
+  address?: {
+    evm?: string
+  }
+  warnings?: Array<{ code?: string, message?: string }>
 }
 
 function resolveGlobalConfigPath(custom?: string): string {
@@ -170,6 +180,27 @@ function formatClobUsdc(value: unknown): string | undefined {
     const numeric = Number(value)
     return Number.isFinite(numeric) ? String(numeric) : undefined
   }
+}
+
+async function getPolymarketBridgeDepositAddress(recipient: `0x${string}`): Promise<string> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  const builderCode = process.env.POLYMARKET_BUILDER_CODE || process.env.AGNT_POLYMARKET_BUILDER_CODE
+  if (builderCode) headers['x-builder-code'] = builderCode
+
+  const res = await fetch(`${POLYMARKET_BRIDGE_API}/deposit`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ address: recipient }),
+  })
+  const body = await res.json().catch(() => null) as PolymarketBridgeDepositResponse | null
+  if (!res.ok) {
+    throw new Error(`Polymarket bridge deposit address failed: HTTP ${res.status}`)
+  }
+  const evm = body?.address?.evm
+  if (!evm || !/^0x[a-fA-F0-9]{40}$/.test(evm)) {
+    throw new Error('Polymarket bridge did not return a valid EVM deposit address.')
+  }
+  return evm
 }
 
 async function getClient(): Promise<ClobClient> {
@@ -386,9 +417,13 @@ async function getReadiness() {
   const { w, account, pub } = getPolygonWallet()
   const cfg = getPolymarketAccountConfig(account.address)
   const client = await getClient()
-  const [pusdBalance, funderPusdBalance, polBalance, pusdAllowances, outcomeApprovals, clobCollateral] = await Promise.all([
+  const [pusdBalance, funderPusdBalance, nativeUsdcBalance, funderNativeUsdcBalance, usdcEbalance, funderUsdcEbalance, polBalance, pusdAllowances, outcomeApprovals, clobCollateral] = await Promise.all([
     pub.readContract({ address: PUSD_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] }) as Promise<bigint>,
     pub.readContract({ address: PUSD_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [cfg.funderAddress] }) as Promise<bigint>,
+    pub.readContract({ address: NATIVE_USDC_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] }) as Promise<bigint>,
+    pub.readContract({ address: NATIVE_USDC_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [cfg.funderAddress] }) as Promise<bigint>,
+    pub.readContract({ address: USDC_E_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] }) as Promise<bigint>,
+    pub.readContract({ address: USDC_E_POLYGON as `0x${string}`, abi: erc20Abi, functionName: 'balanceOf', args: [cfg.funderAddress] }) as Promise<bigint>,
     pub.getBalance({ address: account.address }),
     Promise.all(PUSD_SPENDERS.map(async spender => ({
       ...spender,
@@ -425,6 +460,10 @@ async function getReadiness() {
     usesSeparateFunder: cfg.usesSeparateFunder,
     pusdBalance,
     funderPusdBalance,
+    nativeUsdcBalance,
+    funderNativeUsdcBalance,
+    usdcEbalance,
+    funderUsdcEbalance,
     polBalance,
     clobBalance,
     clobAllowance,
@@ -443,11 +482,15 @@ export async function getPolymarketSetupStatus(requiredPusd?: number): Promise<P
       walletName: readiness.wallet.name,
       address: readiness.address,
       pusdBalance: formatUnits(readiness.pusdBalance, 6),
+      nativeUsdcBalance: formatUnits(readiness.nativeUsdcBalance, 6),
+      usdcEbalance: formatUnits(readiness.usdcEbalance, 6),
       funderAddress: readiness.funderAddress,
       signatureType: readiness.signatureType,
       accountMode: readiness.modeLabel,
       usesSeparateFunder: readiness.usesSeparateFunder,
       funderPusdBalance: formatUnits(readiness.funderPusdBalance, 6),
+      funderNativeUsdcBalance: formatUnits(readiness.funderNativeUsdcBalance, 6),
+      funderUsdcEbalance: formatUnits(readiness.funderUsdcEbalance, 6),
       tradingBalance: readiness.clobBalance,
       tradingAllowance: readiness.clobAllowance,
       requiredPusd,
@@ -498,7 +541,7 @@ async function ensureApproval(): Promise<string> {
         data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender.address as `0x${string}`, maxUint256] }),
       })
       await pub.waitForTransactionReceipt({ hash })
-      approvals.push(`Approved Polygon USDC for ${spender.label} (tx: ${hash.slice(0, 14)}...)`)
+      approvals.push(`Approved Polymarket pUSD for ${spender.label} (tx: ${hash.slice(0, 14)}...)`)
     }
   }
 
@@ -517,8 +560,8 @@ async function ensureApproval(): Promise<string> {
     }
   }
   await client.updateBalanceAllowance({ asset_type: AssetType.COLLATERAL })
-  approvals.push('Synced Polymarket CLOB USDC balance and allowance')
-  return approvals.length ? approvals.join('\n') : 'Polygon USDC and outcome-token approvals are already ready'
+  approvals.push('Synced Polymarket CLOB pUSD balance and allowance')
+  return approvals.length ? approvals.join('\n') : 'Polymarket pUSD and outcome-token approvals are already ready'
 }
 
 async function syncPolymarketBalanceAllowance(tokenId?: string): Promise<string> {
@@ -528,12 +571,13 @@ async function syncPolymarketBalanceAllowance(tokenId?: string): Promise<string>
     await client.updateBalanceAllowance({ asset_type: AssetType.CONDITIONAL, token_id: tokenId })
   }
   const collateral = await client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL })
-  return `Synced Polymarket CLOB.\nTrading USDC: ${formatClobUsdc((collateral as any).balance) ?? 'unknown'}\nUSDC allowance: ${formatClobUsdc((collateral as any).allowance) ?? 'unknown'}`
+  return `Synced Polymarket CLOB.\nTrading USDC: ${formatClobUsdc((collateral as any).balance) ?? 'unknown'}\npUSD allowance: ${formatClobUsdc((collateral as any).allowance) ?? 'unknown'}`
 }
 
-async function fundPolymarket(amount?: number): Promise<string> {
+async function fundPolymarket(amount?: number, sourceToken?: string): Promise<string> {
   const { account, pub, wallet } = getPolygonWallet()
   const cfg = getPolymarketAccountConfig(account.address)
+  const readiness = await getReadiness()
 
   const lines = [
     'Polymarket Funding',
@@ -547,8 +591,12 @@ async function fundPolymarket(amount?: number): Promise<string> {
     lines.push(
       '',
       'How to fund:',
-      `  Send Polygon USDC to: ${cfg.funderAddress}`,
+      `  Send native Polygon USDC or USDC.e through Polymarket bridge to: ${cfg.funderAddress}`,
       '  Then run polymarket action=sync so the CLOB sees the new balance.',
+      '',
+      `Current active wallet native Polygon USDC: ${formatUnits(readiness.nativeUsdcBalance, 6)}`,
+      `Current active wallet USDC.e: ${formatUnits(readiness.usdcEbalance, 6)}`,
+      `Current active wallet Polymarket pUSD: ${formatUnits(readiness.pusdBalance, 6)}`,
     )
     if (!cfg.usesSeparateFunder) {
       lines.push('', 'This setup uses your active wallet as the trading address, so no internal transfer is needed.')
@@ -556,24 +604,69 @@ async function fundPolymarket(amount?: number): Promise<string> {
     return lines.join('\n')
   }
 
-  if (!cfg.usesSeparateFunder) {
+  const rawAmount = parseUnits(String(amount), 6)
+  const preferredSource = String(sourceToken || 'auto').toLowerCase()
+  const pusdBalance = readiness.pusdBalance as bigint
+  const nativeUsdcBalance = readiness.nativeUsdcBalance as bigint
+  const usdcEbalance = readiness.usdcEbalance as bigint
+  const canUsePusd = pusdBalance >= rawAmount
+  const canUseNativeUsdc = nativeUsdcBalance >= rawAmount
+  const canUseUsdcE = usdcEbalance >= rawAmount
+
+  if (!cfg.usesSeparateFunder && (preferredSource === 'pusd' || (preferredSource === 'auto' && canUsePusd))) {
+    await syncPolymarketBalanceAllowance()
     lines.push(
       '',
       'No transfer sent.',
-      'This setup already uses the active wallet as the Polymarket trading address. Run polymarket action=approve or polymarket action=sync instead.',
+      'This setup already uses the active wallet as the Polymarket trading address and pUSD is already in that wallet.',
+      'Synced the CLOB balance/allowance. If trading USDC still shows 0, run polymarket action=approve once.',
     )
     return lines.join('\n')
   }
 
-  const rawAmount = parseUnits(String(amount), 6)
-  const balance = await pub.readContract({
-    address: PUSD_POLYGON as `0x${string}`,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: [account.address],
-  }) as bigint
-  if (balance < rawAmount) {
-    throw new Error(`Insufficient Polygon USDC in active wallet. Need ${amount}, available ${formatUnits(balance, 6)}.`)
+  const bridgeSources = [
+    { key: 'usdc', label: 'native Polygon USDC', address: NATIVE_USDC_POLYGON, balance: nativeUsdcBalance },
+    { key: 'native_usdc', label: 'native Polygon USDC', address: NATIVE_USDC_POLYGON, balance: nativeUsdcBalance },
+    { key: 'usdc.e', label: 'USDC.e', address: USDC_E_POLYGON, balance: usdcEbalance },
+    { key: 'usdce', label: 'USDC.e', address: USDC_E_POLYGON, balance: usdcEbalance },
+  ]
+  const selectedBridgeSource = preferredSource === 'auto'
+    ? (canUseNativeUsdc ? bridgeSources[0] : canUseUsdcE ? bridgeSources[2] : undefined)
+    : bridgeSources.find(source => source.key === preferredSource)
+
+  if (selectedBridgeSource) {
+    if (amount < 2) {
+      throw new Error('Polymarket bridge deposits on Polygon require at least $2. Use amount=2 or higher, or use pUSD if it is already in the wallet.')
+    }
+    if (selectedBridgeSource.balance < rawAmount) {
+      throw new Error(`Insufficient ${selectedBridgeSource.label}. Need ${amount}, available ${formatUnits(selectedBridgeSource.balance, 6)}.`)
+    }
+
+    const depositAddress = await getPolymarketBridgeDepositAddress(cfg.funderAddress)
+    const hash = await wallet.sendTransaction({
+      to: selectedBridgeSource.address as `0x${string}`,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [depositAddress as `0x${string}`, rawAmount],
+      }),
+    })
+    await pub.waitForTransactionReceipt({ hash })
+
+    lines.push(
+      '',
+      `Sent ${amount} ${selectedBridgeSource.label} to Polymarket bridge for ${cfg.funderAddress}.`,
+      `Bridge deposit address: ${depositAddress}`,
+      `Tx: https://polygonscan.com/tx/${hash}`,
+      '',
+      'Polymarket should convert this into trading pUSD/USDC for the configured account. This can take a little time.',
+      'After it lands, run polymarket action=sync and then polymarket action=balance.',
+    )
+    return lines.join('\n')
+  }
+
+  if (!canUsePusd) {
+    throw new Error(`Insufficient funding asset. Need ${amount}. Available: ${formatUnits(nativeUsdcBalance, 6)} native Polygon USDC, ${formatUnits(usdcEbalance, 6)} USDC.e, ${formatUnits(pusdBalance, 6)} pUSD.`)
   }
 
   const hash = await wallet.sendTransaction({
@@ -589,7 +682,7 @@ async function fundPolymarket(amount?: number): Promise<string> {
 
   lines.push(
     '',
-    `Sent ${amount} Polygon USDC to the Polymarket trading/funder address.`,
+    `Sent ${amount} Polymarket pUSD to the Polymarket trading/funder address.`,
     `Tx: https://polygonscan.com/tx/${hash}`,
     '',
     'CLOB balance sync requested. If the CLOB still shows the old balance, wait a few seconds and run polymarket action=sync again.',
@@ -622,7 +715,7 @@ function configurePolymarket(args: Record<string, unknown>): string {
     '',
     'Next:',
     '  1. Run polymarket action=balance',
-    '  2. Fund the shown trading/funder address with Polygon USDC',
+    '  2. Fund the shown trading/funder address with Polymarket pUSD/trading collateral',
     '  3. Run polymarket action=sync',
   ].join('\n')
 }
@@ -665,10 +758,11 @@ const TOOLS = [
         accountMode: { type: 'string', description: 'Polymarket account mode: eoa, proxy, safe, or deposit' },
         funderAddress: { type: 'string', description: 'Per-user Polymarket funder/deposit wallet address' },
         depositAddress: { type: 'string', description: 'Alias for funderAddress' },
+        sourceToken: { type: 'string', description: 'Funding source for deposit/fund: auto, USDC, USDC.e, or pUSD. Default: auto' },
         date: { type: 'string', description: 'Date or deadline hint for event pages with multiple child markets. Example: June 30, 2026' },
         marketHint: { type: 'string', description: 'Plain-English child market hint for event pages. Example: June 30 one' },
         outcome: { type: 'string', enum: ['YES', 'NO'], description: 'Outcome to trade' },
-        amount: { type: 'number', description: 'Polygon USDC to spend (buy) or shares to sell (sell)' },
+        amount: { type: 'number', description: 'Polymarket trading USDC to spend (buy) or shares to sell (sell)' },
         destination: { type: 'string', description: 'Destination address for withdrawal guidance' },
         toAddress: { type: 'string', description: 'Destination address for withdrawal guidance' },
         price: { type: 'number', description: 'Limit price 0.01-0.99. Omit for market price.' },
@@ -681,7 +775,7 @@ const TOOLS = [
         sortBy: { type: 'string', enum: ['volume', 'liquidity', 'newest'], description: 'Sort (for markets)' },
         limit: { type: 'number', description: 'Max results. Default: 10' },
         trader: { type: 'string', description: 'Trader wallet address or Polymarket profile URL (for copy_trade)' },
-        maxPerTrade: { type: 'number', description: 'Max Polygon USDC per copied trade (for copy_trade). Default: 10' },
+        maxPerTrade: { type: 'number', description: 'Max Polymarket trading USDC per copied trade (for copy_trade). Default: 10' },
         marketIds: { type: 'string', description: 'Comma-separated market IDs (for batch_buy)' },
       },
       required: ['action'],
@@ -823,7 +917,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         const client = await getClient()
         const openOrders = await client.getOpenOrders().catch(() => [])
         const ready = readiness.collateralReady && readiness.outcomeTokensReady
-        const polygonUsdcPermissions = [
+        const pusdPermissions = [
           { label: 'Position setup permission', ready: readiness.pusdAllowances[0]?.allowance >= BigInt(1e12) },
           { label: 'Buy regular markets', ready: readiness.pusdAllowances[1]?.allowance >= BigInt(1e12) },
           { label: 'Buy neg-risk markets', ready: readiness.pusdAllowances[2]?.allowance >= BigInt(1e12) },
@@ -832,7 +926,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           { label: 'Sell regular markets', ready: readiness.outcomeApprovals[0]?.approved },
           { label: 'Sell neg-risk markets', ready: readiness.outcomeApprovals[1]?.approved },
         ]
-        const polygonUsdcPermissionLines = polygonUsdcPermissions
+        const pusdPermissionLines = pusdPermissions
           .map(item => `  ${item.label}: ${item.ready ? 'Ready' : 'Needs approval'}`)
           .join('\n')
         const outcomePermissionLines = outcomeTokenPermissions
@@ -847,11 +941,15 @@ async function handle(name: string, args: Record<string, unknown>) {
           `Network: Polygon\n` +
           `Polymarket Trading USDC: ${readiness.clobBalance ?? 'unknown'}\n` +
           `CLOB USDC Allowance: ${readiness.clobAllowance ?? 'unknown'}\n` +
-          `Active Wallet Polygon USDC: ${formatUnits(readiness.pusdBalance, 6)}\n` +
-          `Funder Wallet Polygon USDC: ${formatUnits(readiness.funderPusdBalance, 6)}\n` +
+          `Active Wallet Polymarket pUSD: ${formatUnits(readiness.pusdBalance, 6)}\n` +
+          `Active Wallet Native Polygon USDC: ${formatUnits(readiness.nativeUsdcBalance, 6)}\n` +
+          `Active Wallet Bridged Polygon USDC.e: ${formatUnits(readiness.usdcEbalance, 6)}\n` +
+          `Funder Wallet Polymarket pUSD: ${formatUnits(readiness.funderPusdBalance, 6)}\n` +
+          `Funder Wallet Native Polygon USDC: ${formatUnits(readiness.funderNativeUsdcBalance, 6)}\n` +
+          `Funder Wallet Bridged Polygon USDC.e: ${formatUnits(readiness.funderUsdcEbalance, 6)}\n` +
           `POL: ${formatUnits(readiness.polBalance, 18)}\n` +
           `Open Orders: ${openOrders.length}\n\n` +
-          `Polygon USDC Permissions:\n${polygonUsdcPermissionLines}\n\n` +
+          `Polymarket pUSD Permissions:\n${pusdPermissionLines}\n\n` +
           `Share Selling Permissions:\n${outcomePermissionLines}\n\n` +
           `${ready ? 'Ready to place buy and sell orders.' : 'Run polymarket action=setup for first-time setup, then action=approve before trading.'}\n` +
           `Note: approval is a one-time wallet permission. It uses POL gas, but normal buy/sell order placement does not use wallet gas after setup.`
@@ -862,7 +960,7 @@ async function handle(name: string, args: Record<string, unknown>) {
       case 'fund': {
         const setupGuide = await getSetupGuideIfBlocked('fund')
         if (setupGuide) return text(setupGuide)
-        return text(await fundPolymarket(args.amount as number | undefined))
+        return text(await fundPolymarket(args.amount as number | undefined, args.sourceToken as string | undefined))
       }
 
       case 'sync': {
@@ -876,7 +974,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         const lines = ['Withdraw from Polymarket', '']
 
         if (w) lines.push(`Wallet: ${w.name} (${w.address})`)
-        if (amount !== undefined) lines.push(`Amount: ${amount} Polygon USDC`)
+        if (amount !== undefined) lines.push(`Amount: ${amount} Polymarket trading USDC`)
         if (destination) lines.push(`Recipient: ${destination}`)
         if (w || amount !== undefined || destination) lines.push('')
 
@@ -947,8 +1045,8 @@ async function handle(name: string, args: Record<string, unknown>) {
           `Side: BUY ${outcome}\n` +
           `Mode: ${mode.mode}\n` +
           `${mode.isMarket ? `Max Price: ${(price * 100).toFixed(1)}¢\n` : `Limit Price: ${(price * 100).toFixed(1)}¢ per share\n`}` +
-          (size !== null ? `Size: ${size} shares\n` : `Spend: $${amount.toFixed(2)} Polygon USDC\n`) +
-          `Cost: ~$${amount.toFixed(2)} Polygon USDC\n` +
+          (size !== null ? `Size: ${size} shares\n` : `Spend: $${amount.toFixed(2)} Polymarket trading USDC\n`) +
+          `Cost: ~$${amount.toFixed(2)} Polymarket trading USDC\n` +
           (size !== null ? `Potential payout: $${size.toFixed(2)} (if ${outcome} wins)\n` : '') +
           `Order ID: ${(order as any).orderID || 'pending'}\n` +
           `Status: ${(order as any).status || 'submitted'}`
@@ -1009,7 +1107,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           `Mode: ${mode.mode}\n` +
           `${mode.isMarket ? `Min Price: ${(price * 100).toFixed(1)}¢\n` : `Limit Price: ${(price * 100).toFixed(1)}¢\n`}` +
           `Size: ${size} shares\n` +
-          `Revenue: ~$${(size * price).toFixed(2)} Polygon USDC\n` +
+          `Revenue: ~$${(size * price).toFixed(2)} Polymarket trading USDC\n` +
           `Order ID: ${(order as any).orderID || 'pending'}\n` +
           `Status: ${(order as any).status || 'submitted'}`
         )
@@ -1518,7 +1616,7 @@ async function handle(name: string, args: Record<string, unknown>) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (msg.includes('allowance') || msg.includes('approve')) {
-      return err(`${msg}\n\n💡 Run: polymarket approve — to auto-approve Polygon USDC and outcome tokens for trading.`)
+      return err(`${msg}\n\n💡 Run: polymarket approve — to auto-approve Polymarket pUSD and outcome tokens for trading.`)
     }
     return err(msg)
   }

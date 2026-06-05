@@ -47,6 +47,8 @@ test('formats a first-time Polymarket setup guide with current status', () => {
     walletName: 'Main',
     address: '0x123',
     pusdBalance: '0',
+    nativeUsdcBalance: '9.99',
+    usdcEbalance: '0',
     polBalance: '0.02',
     collateralReady: false,
     outcomeTokensReady: true,
@@ -54,8 +56,9 @@ test('formats a first-time Polymarket setup guide with current status', () => {
 
   assert.match(guide, /Polymarket First-Time Setup/)
   assert.match(guide, /Wallet: Main \(0x123\)/)
-  assert.match(guide, /Polygon USDC/)
-  assert.doesNotMatch(guide, /pUSD/)
+  assert.match(guide, /Wallet Polymarket pUSD: 0/)
+  assert.match(guide, /Wallet native Polygon USDC: 9.99/)
+  assert.match(guide, /not the same as Polymarket CLOB trading collateral/)
   assert.match(guide, /Ask me: "Check my Polymarket balance"/)
   assert.match(guide, /Ask me: "Approve Polymarket trading"/)
   assert.match(guide, /Ask me: "How do I withdraw from Polymarket\?"/)
