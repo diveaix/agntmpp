@@ -84,13 +84,19 @@ function numericBalance(value: string | number | undefined): number {
   return 0
 }
 
+function spendableCollateralBalance(status: PolymarketSetupStatus): number {
+  return Math.max(
+    numericBalance(status.tradingBalance),
+    numericBalance(status.funderPusdBalance),
+    numericBalance(status.pusdBalance),
+  )
+}
+
 export function getPolymarketSetupBlocker(action: string, status: PolymarketSetupStatus): PolymarketSetupBlocker | null {
   if (['search', 'markets', 'market', 'orderbook'].includes(action)) return null
   if (!status.hasWallet) return 'wallet'
 
-  const spendableBalance = status.tradingBalance !== undefined
-    ? numericBalance(status.tradingBalance)
-    : numericBalance(status.pusdBalance)
+  const spendableBalance = spendableCollateralBalance(status)
   if (action === 'buy' && spendableBalance <= 0) return 'funding'
   if (action === 'buy' && status.requiredPusd !== undefined && spendableBalance < status.requiredPusd) return 'funding'
 

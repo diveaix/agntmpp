@@ -106,6 +106,30 @@ test('blocks buy setup only when funding or approvals are missing', () => {
   }), null)
 })
 
+test('does not block funding when funder pUSD exists but CLOB balance lags', () => {
+  assert.equal(getPolymarketSetupBlocker('buy', {
+    hasWallet: true,
+    tradingBalance: 0,
+    funderPusdBalance: 5,
+    pusdBalance: 0,
+    requiredPusd: 2,
+    polBalance: 1,
+    collateralReady: true,
+    outcomeTokensReady: true,
+  }), null)
+
+  assert.equal(getPolymarketSetupBlocker('buy', {
+    hasWallet: true,
+    tradingBalance: 0,
+    funderPusdBalance: 5,
+    pusdBalance: 0,
+    requiredPusd: 2,
+    polBalance: 1,
+    collateralReady: false,
+    outcomeTokensReady: true,
+  }), 'approval')
+})
+
 test('does not interrupt read-only Polymarket actions with setup', () => {
   assert.equal(getPolymarketSetupBlocker('search', { hasWallet: false }), null)
   assert.equal(getPolymarketSetupBlocker('market', { hasWallet: false }), null)
