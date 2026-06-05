@@ -229,7 +229,14 @@ async function getClient(): Promise<ClobClient> {
       signatureType: cfg.signatureType,
       funderAddress: cfg.funderAddress,
     })
-    creds = await tmp.createOrDeriveApiKey()
+    try {
+      creds = await tmp.createOrDeriveApiKey()
+    } catch (e) {
+      creds = await tmp.deriveApiKey().catch(() => {
+        const msg = e instanceof Error ? e.message : String(e)
+        throw new Error(`Could not create or derive Polymarket CLOB API key for ${account.address}. Connect this wallet on polymarket.com once, then try again. Original error: ${msg}`)
+      })
+    }
   }
 
   _client = new ClobClient({
