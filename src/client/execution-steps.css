@@ -1,0 +1,58 @@
+.execution-section {
+  color: #e8e8e8;
+}
+
+.execution-track { position: relative; }
+.execution-track[data-scroll='true'] { height: calc(var(--execution-panel-height) + 100svh); }
+.execution-track[data-scroll='true'] .execution-layout { position: sticky; top: var(--execution-pin-top); }
+
+.execution-layout {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  align-items: center;
+  gap: 24px;
+  min-height: 560px;
+  padding: 32px;
+  border: 1px solid #252525;
+  border-radius: 14px;
+  background: radial-gradient(ellipse at 25% 45%, #141412 0%, #080808 57%);
+  box-shadow: inset 0 1px 0 #ffffff08;
+}
+
+.execution-artwork { width: 100%; height: 494px; display: grid; place-items: center; }
+.execution-artwork > svg { display: block; width: 100%; height: 100%; min-height: 0; overflow: visible; font-family: var(--font-sans); }
+.execution-copy { min-width: 0; }
+.execution-caption-slot { display: grid; min-height: 264px; }
+.execution-caption { grid-area: 1 / 1; visibility: hidden; }
+.execution-caption[data-active='true'] { visibility: visible; }
+.execution-caption h3 { margin: 0; font: 400 clamp(30px, 2.8vw, 38px)/1.16 var(--font-sans); letter-spacing: -.035em; }
+.execution-caption h3 > span { color: #8a8a8a; }
+.execution-caption p { max-width: 460px; margin: 20px 0 0; font: 400 16px/1.7 var(--font-sans); letter-spacing: 0; color: #a6a6a6; }
+.execution-progress { display: flex; align-items: center; gap: 18px; margin-top: 32px; }
+.execution-steps { display: flex; flex: 1; gap: 4px; padding: 4px; border: 1px solid #30302e; border-radius: 12px; background: #141414; }
+.execution-steps button { display: flex; justify-content: center; align-items: center; flex: 1; min-width: 0; min-height: 42px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #aaa79e; font: 500 12px var(--font-sans); cursor: pointer; transition: color .2s, background .2s; }
+.execution-steps button[aria-current='step'] { background: #e8e6e0; color: #141414; }
+.execution-steps button:hover { color: #f2f0e9; }
+.execution-steps button[aria-current='step']:hover { color: #141414; }
+.execution-steps button:focus-visible { outline: 1px solid #ddd; outline-offset: 3px; }
+
+@media (max-width: 1000px) and (min-width: 701px) {
+  .execution-layout { padding: 24px; }
+  .execution-caption h3 { font-size: 30px; }
+  .execution-steps button { padding: 0 8px; }
+}
+
+@media (max-width: 700px) {
+  .execution-layout { grid-template-columns: 1fr; min-height: 0; padding: 20px; }
+  .execution-artwork { height: clamp(140px, calc(100svh - 500px), 300px); }
+  .execution-caption-slot { min-height: 250px; }
+  .execution-caption h3 { font-size: 28px; }
+  .execution-caption p { font-size: 15px; line-height: 1.65; margin-top: 16px; }
+  .execution-progress { margin-top: 24px; }
+  .execution-steps button { padding: 0 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .execution-steps button { transition: none; }
+}

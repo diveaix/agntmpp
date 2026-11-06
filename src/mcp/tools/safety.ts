@@ -1,12 +1,12 @@
 /**
- * ./AGNT Protocol — Safety & Operations Tools
- * Revoke approvals, spending limits, emergency stop, tx simulation, liquidation monitoring.
+ * ./AGENT Protocol — Safety & Operations Tools
+ * Revoke approvals, spending limits, tx simulation, liquidation monitoring.
  */
 
 import type { ToolModule } from './index.js'
 import { getActiveWallet, listWallets } from '../wallet.js'
 import { getPublicClient } from '../chains.js'
-import { loadAutomations, cancelAutomation, type AutomationEntry } from '../scheduler.js'
+import { loadAutomations } from '../scheduler.js'
 import { setLimits, removeLimits, getLimits, getAllLimits, getSpentToday, resetSpendLedger } from '../spending-guard.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
@@ -15,11 +15,11 @@ const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}
 const TOOLS = [
   {
     name: 'safety',
-    description: 'Safety & Operations Tools for approvals, spending limits, emergency stop, and liquidation monitoring.',
+    description: 'Safety & Operations Tools for approvals, spending limits, and liquidation monitoring.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        action: { type: 'string', enum: ['revoke_approvals', 'set_spending_limit', 'view_limits', 'remove_limits', 'reset_spent', 'emergency_stop', 'simulate_tx', 'liquidations', 'export_history'], description: 'Action to perform' },
+        action: { type: 'string', enum: ['revoke_approvals', 'set_spending_limit', 'view_limits', 'remove_limits', 'reset_spent', 'simulate_tx', 'liquidations', 'export_history'], description: 'Action to perform' },
         chain: { type: 'string', description: 'Chain to check or simulate on (for revoke_approvals, simulate_tx)' },
         token: { type: 'string', description: 'Specific token address (for revoke_approvals)' },
         dailyLimit: { type: 'number', description: 'Maximum USD value the agent can spend per day (for set_spending_limit)' },
@@ -148,49 +148,6 @@ async function handle(name: string, args: Record<string, unknown>) {
         )
       }
 
-      case 'emergency_stop': {
-        const lines: string[] = ['🚨 EMERGENCY STOP ACTIVATED\n']
-
-        // 1. Cancel all automations
-        const store = loadAutomations()
-        let cancelled = 0
-        for (const auto of store.automations) {
-          if (auto.status === 'active') {
-            cancelAutomation(auto.id)
-            cancelled++
-          }
-        }
-        lines.push(`Automations cancelled: ${cancelled}`)
-
-        // 2. Report HL positions to manually close
-        const w = getActiveWallet()
-        if (w) {
-          try {
-            const hlRes = await fetch('https://api.hyperliquid.xyz/info', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type: 'clearinghouseState', user: w.address }),
-            })
-            const hlData = await hlRes.json() as {
-              assetPositions: { position: { coin: string; szi: string } }[]
-            }
-            const openPositions = hlData.assetPositions.filter((p) => parseFloat(p.position.szi) !== 0)
-            lines.push(`Open HL positions: ${openPositions.length}`)
-            if (openPositions.length) {
-              lines.push(`  ⚠️ Close manually: ${openPositions.map((p) => p.position.coin).join(', ')}`)
-            }
-          } catch {
-            lines.push('Hyperliquid: Could not check positions.')
-          }
-          lines.push(`\nWallet: ${w.name} (${w.address})`)
-        }
-
-        lines.push(`\n🔒 All automated strategies have been stopped.`)
-        lines.push(`⚠️ Open positions on Hyperliquid must be closed manually via hl_place_order (reduce-only).`)
-
-        return text(lines.join('\n'))
-      }
-
       case 'simulate_tx': {
         if (!args.to || !args.data) return err('Missing to or data parameter')
         const to = args.to as string
@@ -232,43 +189,6 @@ async function handle(name: string, args: Record<string, unknown>) {
 
         const lines: string[] = ['🏥 Liquidation Monitor\n']
         let anyRisk = false
-
-        // Check Hyperliquid positions
-        try {
-          const hlRes = await fetch('https://api.hyperliquid.xyz/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'clearinghouseState', user: w.address }),
-          })
-          const hlData = await hlRes.json() as {
-            marginSummary: { accountValue: string; totalMarginUsed: string }
-            assetPositions: { position: { coin: string; liquidationPx: string | null; szi: string; positionValue: string; leverage: { value: number } } }[]
-          }
-
-          const positions = hlData.assetPositions.filter((p) => parseFloat(p.position.szi) !== 0)
-          if (positions.length) {
-            const acctVal = parseFloat(hlData.marginSummary.accountValue)
-            const marginUsed = parseFloat(hlData.marginSummary.totalMarginUsed)
-            const marginRatio = acctVal > 0 ? marginUsed / acctVal : 0
-
-            lines.push(`Hyperliquid:`)
-            lines.push(`  Account Value: $${acctVal.toFixed(2)}`)
-            lines.push(`  Margin Used: ${(marginRatio * 100).toFixed(1)}% ${marginRatio > 0.8 ? '🔴 CRITICAL' : marginRatio > 0.5 ? '🟡 WARNING' : '🟢 OK'}`)
-
-            for (const { position: p } of positions) {
-              const liqPx = p.liquidationPx ? `$${parseFloat(p.liquidationPx).toFixed(2)}` : 'N/A'
-              const leverage = p.leverage?.value || 1
-              lines.push(`  ${p.coin.padEnd(8)} Liq: ${liqPx} | ${leverage}x leverage`)
-              if (p.liquidationPx) anyRisk = true
-            }
-          } else {
-            lines.push('Hyperliquid: No open positions.')
-          }
-        } catch {
-          lines.push('Hyperliquid: Could not check.')
-        }
-
-        lines.push('')
 
         // Check Aave
         const AAVE_POOLS: Record<string, `0x${string}`> = {
@@ -337,7 +257,6 @@ async function handle(name: string, args: Record<string, unknown>) {
         }
 
         lines.push(`\n💡 For on-chain transaction history, use a block explorer:`)
-        lines.push(`  Tempo: https://explore.tempo.xyz/address/${w.address}`)
         lines.push(`  Arbiscan: https://arbiscan.io/address/${w.address}`)
 
         return text(lines.join('\n'))

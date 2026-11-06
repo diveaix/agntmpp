@@ -1,0 +1,163 @@
+@font-face {
+  font-family: 'Figtree';
+  src: url('/fonts/Figtree-Variable.ttf') format('truetype');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Array';
+  src: url('/fonts/Array-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Dotted Array headlines from the reference, with Figtree for reading. */
+:root {
+  --font-sans: 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --display: var(--font-sans);
+  --font-accent: 'Array', var(--font-sans);
+  --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea,
+.pass-sale {
+  font-family: var(--font-sans);
+}
+
+body {
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2 {
+  font-family: var(--font-accent);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+h3,
+h4 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+
+.nav-logo,
+.wl-nav-logo,
+.d-brand {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: -.04em;
+}
+
+.nav-cta,
+.hero-cta,
+.footer-nav,
+.compat-name,
+.track-tab,
+.at-action-btn,
+.d-nav-link,
+.d-search input,
+.d-search button,
+.d-code-copy,
+.d-search-clear,
+.d-no-results button,
+.dash-tab,
+.dash-filter,
+.dash-btn,
+.dash-section input,
+.dash-vault input,
+.dash-field input,
+.dash-form input,
+.dash-auth-toggle button,
+.dash-field-group input,
+.dash-login-card button,
+.wl-nav-link,
+.wl-button,
+.wl-email-input {
+  font-family: var(--font-sans);
+  letter-spacing: -.01em;
+}
+
+.nav-cta {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.flow-step h3,
+.tech-card h3,
+.live-demo-info h3,
+.agent-terminal-header h3,
+.tokenomics h3,
+.timeline h3,
+.faq h3,
+.dash-section__bar h2,
+.dash-tile__title {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -.025em;
+}
+
+.tk-hero h1,
+.presale-hero h1,
+.wl-page h1,
+.d-paper h1,
+.d-paper h2,
+.manifesto-inner h2,
+.wh-screen-content h1 > .wh-screen-title,
+.accord-title,
+.mcp-setup > h3 {
+  font-family: var(--font-accent);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+
+.wh-screen-content h1 > .wh-screen-title {
+  font-size: 52px;
+  line-height: 1.06;
+}
+
+.pb-label,
+.d-nav-title,
+.d-eyebrow,
+.tk-badge {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: .12em;
+}
+
+.footer-big-logo,
+.manifesto-glitch {
+  font-family: var(--font-accent);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+code,
+pre,
+kbd,
+.terminal-body,
+.cc-tool-badge,
+.cc-tool-args,
+.term-comment,
+.term-command code,
+.term-code pre,
+.d-code code {
+  font-family: var(--mono);
+}
+
+@media (max-width: 600px) {
+  .nav-cta {
+    font-size: 10px;
+  }
+}

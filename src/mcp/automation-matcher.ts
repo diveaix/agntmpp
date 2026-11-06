@@ -1,5 +1,5 @@
 import type { AutomationEntry } from './scheduler.js'
-import { isAutomationStillValid, type EventTriggerAutomationParams, type GrokVerificationResult, type UniversalEvent } from './automation-types.js'
+import { isNotificationEvent, isAutomationStillValid, type EventTriggerAutomationParams, type GrokVerificationResult, type UniversalEvent } from './automation-types.js'
 
 function lower(value: string | undefined): string {
   return (value || '').toLowerCase()
@@ -29,7 +29,7 @@ export function buildUniversalEventFromVerification(
 
 export function matchEventAutomations(event: UniversalEvent, automations: AutomationEntry[]): AutomationEntry[] {
   return automations.filter((auto) => {
-    if (auto.status !== 'active' || auto.type !== 'event_trigger') return false
+    if (auto.status !== 'active' || auto.type !== 'event_trigger' || !isNotificationEvent(auto.params) || auto.params.mode !== 'notify_only') return false
     const params = auto.params as unknown as EventTriggerAutomationParams
     if (!isAutomationStillValid(params.validUntil)) return false
     const trigger = params.trigger

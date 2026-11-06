@@ -15,14 +15,14 @@ export function classifyTxError(error: unknown): string {
   const raw = redactSecrets(error instanceof Error ? error.message : String(error))
   const lower = raw.toLowerCase()
 
-  if (lower.includes('no active agnt wallet') || lower.includes('no wallet')) {
+  if (/no active (?:agent|agnt) wallet/.test(lower) || lower.includes('no wallet')) {
     return 'No active wallet is selected for this user. Create or switch to a user wallet before executing transactions.'
   }
   if (lower.includes('insufficient funds') || lower.includes('exceeds the balance') || lower.includes('not enough') || lower.includes('insufficient')) {
     return raw
   }
   if (lower.includes('allowance') || lower.includes('approval') || lower.includes('transfer_from_failed') || lower.includes('transferfrom')) {
-    return `Token approval or allowance failed. AGNT uses exact-amount approvals, so try again with the same amount or check that the token balance is available. Details: ${raw}`
+    return `Token approval or allowance failed. AGENT uses exact-amount approvals, so try again with the same amount or check that the token balance is available. Details: ${raw}`
   }
   if (lower.includes('execution reverted') || lower.includes('reverted')) {
     return `Transaction reverted before completion. No successful transfer was confirmed. Details: ${raw}`

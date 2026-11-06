@@ -1,3 +1,4 @@
+import { hasRemovedIntegration, isRemovedIntegration } from './integration-policy.js'
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 const CHAIN_IDS: Record<string, string> = {
@@ -129,17 +130,18 @@ export function formatTradeSafetyNotice(assessment: TradeSafetyAssessment): stri
 }
 
 async function fetchDexPairs(chain: string, token: string): Promise<DexPairLike[]> {
+  if (isRemovedIntegration(chain)) return []
   const dsChain = DS_CHAIN_IDS[chain] || chain
 
   try {
     const direct = await fetchJson(`https://api.dexscreener.com/token-pairs/v1/${dsChain}/${token}`) as DexPairLike[]
-    if (Array.isArray(direct)) return direct.filter((p) => p.chainId === dsChain)
+    if (Array.isArray(direct)) return direct.filter((p) => p.chainId === dsChain && !hasRemovedIntegration(p))
   } catch {
     // Fall through to the broader endpoint; DexScreener has a few chain-specific quirks.
   }
 
   const data = await fetchJson(`https://api.dexscreener.com/latest/dex/tokens/${token}`) as { pairs?: DexPairLike[] }
-  return (data.pairs || []).filter((p) => p.chainId === dsChain)
+  return (data.pairs || []).filter((p) => p.chainId === dsChain && !hasRemovedIntegration(p))
 }
 
 async function fetchSecurityWarnings(chain: string, token: string): Promise<{ name?: string; symbol?: string; warnings: string[] }> {
@@ -163,6 +165,7 @@ async function fetchSecurityWarnings(chain: string, token: string): Promise<{ na
       }>
     }
     const info = data.result?.[token.toLowerCase()] || Object.values(data.result || {})[0]
+    if (hasRemovedIntegration(info)) return { warnings: ['This token integration is not supported.'] }
     if (!info) return { warnings: ['Token was not found in the GoPlus security database.'] }
 
     const warnings: string[] = []

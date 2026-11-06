@@ -1,6 +1,8 @@
-// Product access switch. Keep false in production so dashboard, checkout,
-// API keys, connector links, and normal access controls are active.
+// Keep false in production to preserve normal MCP and sale access controls.
 export const ACCESS_PAUSED = false
 
+// Dashboard access is paused independently of MCP and sale authentication.
+export const DASHBOARD_ENABLED = false
+
 export const FEATURE_DISABLED_MESSAGE =
-  'This feature is currently unavailable. Please try again later or contact AGNT support.'
+  'This feature is currently unavailable. Please try again later or contact AGENT support.'

@@ -1,8 +1,9 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { dirname, isAbsolute, resolve } from 'path'
 import { decrypt, encrypt, getPassphrase } from './crypto.js'
 import { getCurrentWalletScope } from './tool-context.js'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 
 const KEY_LEN = 32
 
@@ -38,16 +39,15 @@ function loadVault(custom?: string): WalletVaultStore {
     const raw = readFileSync(fp, 'utf-8')
     const json = raw.trim().startsWith('{') ? raw : decrypt(raw, getPassphrase())
     return JSON.parse(json) as WalletVaultStore
-  } catch {
+  } catch (error) {
+    handleStoreReadFailure('Wallet export vault', error)
     return {}
   }
 }
 
 function saveVault(store: WalletVaultStore, custom?: string) {
   const fp = resolvePath(custom)
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(fp, encrypt(JSON.stringify(store, null, 2), getPassphrase()), 'utf-8')
+  writePrivateFileAtomicSync(fp, encrypt(JSON.stringify(store, null, 2), getPassphrase()))
 }
 
 function hashPassword(password: string, saltHex: string): string {

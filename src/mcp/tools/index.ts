@@ -1,6 +1,6 @@
 /**
- * ./AGNT Protocol — Tool Registry
- * Central registry with MPP payment gating.
+ * ./AGENT Protocol — Tool Registry
+ * Central registry for account-authorized tools.
  * Both server.ts (stdio) and serve.ts (SSE) import from here.
  * Integrates auto-memory recording and Telegram notifications.
  */
@@ -32,10 +32,8 @@ export interface ToolModule {
 
 // ─── Import all venue modules ────────────────────────────
 
-import tempoModule from './tempo.js'
-import hyperliquidModule from './hyperliquid.js'
+import walletModule from './wallet.js'
 import marketDataModule from './market-data.js'
-import automationsModule from './automations.js'
 import defiModule from './defi.js'
 import analyticsModule from './analytics.js'
 import safetyModule from './safety.js'
@@ -45,36 +43,29 @@ import lendingModule from './lending.js'
 import swapsModule from './swaps.js'
 import bridgesModule from './bridges.js'
 import walletSendModule from './wallet-send.js'
-import dataPlatformsModule from './data-platforms.js'
-import dexIntelModule from './dex-intel.js'
+import smartSwapModule from './smart-swap.js'
 import accountModule from './account.js'
-import billingModule from './billing.js'
 
 import memoryModule from './memory.js'
-import polymarketModule from './polymarket.js'
 import skillManagerModule from './skill-manager.js'
 
 // ─── Import skill system ────────────────────────────────
 
 import { loadAllSkills, getSkillTools, handleSkillCall, getSkillCount } from '../skill-loader.js'
 
-// ─── Import MPP pricing ─────────────────────────────────
-
-import { isFreeTool, getToolTier, getToolPrice } from '../pricing.js'
-import { PRICING } from '../mpp.js'
-import { isSessionCached, cacheSession, recordPayment, recordCall } from '../payment-tracker.js'
+import { recordCall } from '../payment-tracker.js'
 
 import { autoRemember } from '../memory.js'
 import { recordToolActivity } from '../activity-log.js'
 import { formatTxError } from '../tx-errors.js'
 import { getActiveWallet } from '../wallet.js'
+import { liveExecutionEnabled } from '../production-readiness.js'
+import { enforcePassAccess } from '../sale/runtime.js'
 
 const MODULES: ToolModule[] = [
 
-  tempoModule,
-  hyperliquidModule,
+  walletModule,
   marketDataModule,
-  automationsModule,
   defiModule,
   analyticsModule,
   safetyModule,
@@ -84,12 +75,9 @@ const MODULES: ToolModule[] = [
   bridgesModule,
   swapsModule,
   walletSendModule,
-  dataPlatformsModule,
-  dexIntelModule,
+  smartSwapModule,
   accountModule,
-  billingModule,
   memoryModule,
-  polymarketModule,
   skillManagerModule,
 ]
 
@@ -107,78 +95,28 @@ export async function initSkills() {
   ALL_TOOLS = getAllTools()
 }
 
-/** Route a tool call to the correct venue module, with MPP payment gating. */
+/** Route a tool call to the correct module within its account and wallet scope. */
 export async function handleTool(
   name: string,
   args: Record<string, unknown>,
-  meta?: Record<string, unknown>,
+  _meta?: Record<string, unknown>,
   auth?: AuthContext,
   walletScope?: string,
 ): Promise<ToolResult> {
   return runWithToolContext({ auth, walletScope: walletScope || (auth ? `user:${auth.userId}` : undefined) }, async () => {
-  recordCall()
-
-  // ── Free tools: zero overhead ──
-  if (isFreeTool(name)) {
-    return execTool(name, args, auth)
-  }
-
-  // ── Check session cache for repeat callers ──
-  const credential = meta?.['org.paymentauth/credential'] as Record<string, unknown> | undefined
-  const payerAddress = credential?.source as string | undefined
-
-  if (payerAddress && isSessionCached(payerAddress, name)) {
-    return execTool(name, args, auth)
-  }
-
-  // ── Paid tool: check for credential ──
-  if (!credential) {
-    // Return -32042 Payment Required challenge
-    const tier = getToolTier(name)
-    const amount = getToolPrice(name)
-    return {
-      content: [{ type: 'text', text: `⚡ Payment required: $${amount} (${tier} tier) for ${name}` }],
-      isError: true,
-      _meta: {
-        'org.paymentauth/challenge': {
-          id: `ch_${Date.now().toString(36)}`,
-          realm: 'agnt.dev',
-          method: 'tempo',
-          intent: 'charge',
-          request: {
-            amount: amount,
-            currency: process.env.AGNT_PAYMENT_CURRENCY || '0x20C000000000000000000000b9537d11c60E8b50',
-            recipient: process.env.AGNT_RECIPIENT || '0x0000000000000000000000000000000000000000',
-          },
-        },
-      },
+    if (process.env.AGNT_MPP_ENABLED === 'true') {
+      return {
+        content: [{ type: 'text', text: 'Per-call payment settlement is no longer supported. Disable AGNT_MPP_ENABLED and use account access.' }],
+        isError: true,
+      }
     }
-  }
-
-  // ── Credential present: verify + execute ──
-  // In production, mppx.verify() validates the payment on-chain.
-  // For now, we trust the credential and execute.
-  const tier = getToolTier(name)
-  const amount = getToolPrice(name)
-  const txHash = (credential.payload as Record<string, unknown>)?.hash as string || 'optimistic'
-
-  if (payerAddress) {
-    cacheSession(payerAddress, name)
-    recordPayment(name, tier, amount, payerAddress, txHash)
-  }
-
-  const result = await execTool(name, args, auth)
-  result._meta = {
-    ...result._meta,
-    'org.paymentauth/receipt': {
-      status: 'success',
-      method: 'tempo',
-      tier,
-      amount,
-      txHash,
-    },
-  }
-  return result
+    try {
+      await enforcePassAccess(auth?.userId, name)
+    } catch (error) {
+      return { content: [{ type: 'text', text: error instanceof Error ? error.message : 'Pass access unavailable' }], isError: true }
+    }
+    recordCall()
+    return execTool(name, args, auth)
   })
 }
 
@@ -186,22 +124,18 @@ export async function handleTool(
 
 const WRITE_TOOLS = new Set([
   'wallet', 'wallet_send',
-  'tempo_swap', 'smart_swap', 'uniswap', 'pancakeswap',
-  'tempo_bridge', 'relay', 'debridge', 'jumper',
-  'aave', 'morpho', 'lido', 'eigenlayer', 'pendle', 'ethena', 'ondo',
-  'hyperliquid', 'polymarket', 'payment', 'yield', 'advanced',
+  'smart_swap', 'uniswap', 'pancakeswap',
+  'relay', 'jumper',
+  'aave', 'morpho', 'lido', 'pendle', 'ethena', 'ondo',
+  'payment', 'yield', 'advanced',
 ])
 
 const WRITE_ACTIONS = new Set([
   'swap', 'execute', 'find_and_swap', 'bridge',
-  'supply', 'withdraw', 'stake', 'deposit', 'borrow', 'repay',
+  'supply', 'withdraw', 'stake', 'stake_eth', 'deposit', 'borrow', 'repay',
   'order', 'buy', 'sell', 'send', 'mint', 'redeem', 'approve',
   'buy_pt', 'buy_yt',
   'lp', 'close', 'cancel', 'leverage', 'fund',
-  'scale', 'stop_market', 'stop_limit', 'take_market', 'take_limit', 'twap', 'bracket', 'trailing_stop',
-  'copy_trade', 'dca', 'spot', 'earn', 'vaults', 'staking',
-  'stop_loss', 'take_profit', 'batch_buy',
-  'deploy_token', 'dao_vote', 'agent_pay',
   'swap_any_chain',
 ])
 
@@ -214,6 +148,13 @@ function isWriteAction(name: string, args: Record<string, unknown>): boolean {
 
 /** Execute a tool via the module chain + skills, with auto-memory hooks. */
 async function execTool(name: string, args: Record<string, unknown>, auth?: AuthContext): Promise<ToolResult> {
+  if (isWriteAction(name, args) && !liveExecutionEnabled()) {
+    return {
+      content: [{ type: 'text', text: '❌ Live transaction execution is disabled. Set AGNT_LIVE_EXECUTION_ENABLED=true only after operational approval.' }],
+      isError: true,
+    }
+  }
+
   // Check built-in modules first
   for (const mod of MODULES) {
     let result: ToolResult | null

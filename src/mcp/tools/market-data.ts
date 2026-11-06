@@ -1,10 +1,11 @@
 /**
- * ./AGNT Protocol — Market Data Tools
- * Real-time price data, charts, funding rates, and gas prices.
+ * ./AGENT Protocol — Market Data Tools
+ * Real-time price data, charts and gas prices.
  * Read-only tools — no wallet or signing needed.
  */
 
 import type { ToolModule } from './index.js'
+import { isRemovedIntegration } from './integration-policy.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}` }], isError: true })
@@ -12,13 +13,11 @@ const err = (e: string) => ({ content: [{ type: 'text' as const, text: `❌ ${e}
 // ─── CoinGecko Helpers ───────────────────────────────────
 
 const CG_BASE = 'https://api.coingecko.com/api/v3'
-const DL_BASE = 'https://api.llama.fi'
 
 // Map common symbols to CoinGecko IDs
 const SYMBOL_MAP: Record<string, string> = {
   btc: 'bitcoin', wbtc: 'bitcoin',
   eth: 'ethereum', weth: 'ethereum',
-  sol: 'solana',
   usdc: 'usd-coin', 'usdc.e': 'usd-coin',
   usdt: 'tether', usdt0: 'tether',
   'eurc.e': 'euro-coin', eurc: 'euro-coin',
@@ -33,7 +32,6 @@ const SYMBOL_MAP: Record<string, string> = {
   mkr: 'maker',
   snx: 'havven',
   crv: 'curve-dao-token',
-  hype: 'hyperliquid',
   doge: 'dogecoin',
   pepe: 'pepe',
   sui: 'sui',
@@ -61,16 +59,15 @@ async function fetchJson(url: string): Promise<unknown> {
 const TOOLS = [
   {
     name: 'market_data',
-    description: 'Get real-time market data including prices, charts, funding rates, and gas fees.',
+    description: 'Get real-time market data including prices, charts and gas fees.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        action: { type: 'string', enum: ['price', 'prices', 'chart', 'funding_rates', 'gas'], description: 'Action to perform' },
+        action: { type: 'string', enum: ['price', 'prices', 'chart', 'gas'], description: 'Action to perform' },
         token: { type: 'string', description: 'Token symbol (for price, chart)' },
         tokens: { type: 'string', description: 'Comma-separated token symbols (for prices)' },
         currency: { type: 'string', description: 'Quote currency. Default: usd (for price, prices)' },
         days: { type: 'number', description: 'Number of days of data. Options: 1, 7, 14, 30, 90, 180, 365. Default: 7 (for chart)' },
-        market: { type: 'string', description: 'Optional specific market (for funding_rates)' },
         chain: { type: 'string', description: 'Optional specific chain (for gas)' },
       },
       required: ['action'],
@@ -82,6 +79,7 @@ const TOOLS = [
 
 async function handle(name: string, args: Record<string, unknown>) {
   if (name === 'market_data') {
+    if ([args.token, args.chain, ...String(args.tokens || '').split(',')].some(isRemovedIntegration)) return err('This integration is not supported.')
     switch (args.action) {
       case 'price': {
         if (!args.token) return err('Missing token parameter')
@@ -172,62 +170,11 @@ async function handle(name: string, args: Record<string, unknown>) {
         }
       }
 
-      case 'funding_rates': {
-        const market = args.market as string | undefined
-
-        try {
-          // Hyperliquid info endpoint for meta + funding
-          const metaRes = await fetch('https://api.hyperliquid.xyz/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'metaAndAssetCtxs' }),
-          })
-          const metaData = await metaRes.json() as [{ universe: { name: string }[] }, { funding: string, openInterest: string, markPx: string, dayNtlVlm: string }[]]
-
-          const universe = metaData[0].universe
-          const ctxs = metaData[1]
-          const lines: string[] = ['📊 Hyperliquid Funding Rates:\n']
-          lines.push(`${'Market'.padEnd(10)} ${'Funding (1h)'.padEnd(14)} ${'Mark Price'.padEnd(14)} ${'OI'.padEnd(14)} 24h Vol`)
-          lines.push('─'.repeat(66))
-
-          const entries = universe.map((u, i) => ({
-            name: u.name,
-            funding: parseFloat(ctxs[i].funding),
-            markPx: parseFloat(ctxs[i].markPx),
-            oi: parseFloat(ctxs[i].openInterest),
-            vol: parseFloat(ctxs[i].dayNtlVlm || '0'),
-          }))
-
-          let filtered = entries
-          if (market) {
-            filtered = entries.filter((e) => e.name.toLowerCase() === market.toLowerCase())
-            if (!filtered.length) return err(`Market "${market}" not found on Hyperliquid.`)
-          } else {
-            // Show top 15 by volume
-            filtered = entries.sort((a, b) => b.vol - a.vol).slice(0, 15)
-          }
-
-          for (const e of filtered) {
-            const fundStr = `${(e.funding * 100).toFixed(4)}%`
-            const priceStr = `$${e.markPx.toLocaleString()}`
-            const oiStr = `$${(e.oi * e.markPx / 1e6).toFixed(1)}M`
-            const volStr = `$${(e.vol / 1e6).toFixed(1)}M`
-            lines.push(`${e.name.padEnd(10)} ${fundStr.padEnd(14)} ${priceStr.padEnd(14)} ${oiStr.padEnd(14)} ${volStr}`)
-          }
-
-          lines.push(`\nAnnualized = hourly rate × 8760`)
-          return text(lines.join('\n'))
-        } catch (e) {
-          return err(`Failed to fetch funding rates: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-
       case 'gas': {
         const chain = args.chain as string | undefined
 
-        // Gas is generally very low on L2s and Tempo, so we provide estimates
+        // Gas is generally very low on L2s, so we provide estimates
         const GAS_ESTIMATES: Record<string, { label: string; gas: string; note: string }> = {
-          tempo: { label: 'Tempo', gas: '~0.001 USD', note: 'Paid in stablecoins, sub-cent' },
           ethereum: { label: 'Ethereum', gas: 'Variable', note: 'Check etherscan.io/gastracker' },
           arbitrum: { label: 'Arbitrum', gas: '~0.01-0.10 USD', note: 'L2 — very low fees' },
           base: { label: 'Base', gas: '~0.01-0.05 USD', note: 'L2 — very low fees' },

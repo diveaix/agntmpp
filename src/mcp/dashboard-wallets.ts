@@ -1,8 +1,6 @@
 import { formatUnits, isAddress } from 'viem'
-import { TOKENS } from './config.js'
 import { getPublicClient, SUPPORTED_CHAINS } from './chains.js'
 import { deleteWallet, listWallets, type WalletEntry } from './wallet.js'
-import { tip20Abi } from './abis.js'
 import { hasWalletExportPassword, setWalletExportPassword, verifyWalletExportPassword } from './wallet-vault.js'
 
 const DEFAULT_BALANCE_CHAINS = ['base', 'arbitrum', 'optimism', 'polygon', 'ethereum'] as const
@@ -55,45 +53,23 @@ async function getNativeBalance(chainKey: string, address: `0x${string}`): Promi
     return {
       chain: chainKey,
       chainLabel: chain.label,
-      symbol: chainKey === 'polygon' ? 'POL' : 'ETH',
+      symbol: chain.nativeSymbol,
       balance: formatUnits(balance, 18),
     }
   } catch (error) {
     return {
       chain: chainKey,
       chainLabel: chain.label,
-      symbol: chainKey === 'polygon' ? 'POL' : 'ETH',
+      symbol: chain.nativeSymbol,
       balance: '0',
       error: error instanceof Error ? error.message : String(error),
     }
   }
 }
 
-async function getTempoTokenBalances(address: `0x${string}`): Promise<DashboardWalletBalance[]> {
-  const client = getPublicClient('tempo')
-  const balances: DashboardWalletBalance[] = []
-  for (const token of Object.values(TOKENS)) {
-    try {
-      const raw = await client.readContract({ address: token.address, abi: tip20Abi, functionName: 'balanceOf', args: [address] }) as bigint
-      if (raw > 0n) {
-        balances.push({
-          chain: 'tempo',
-          chainLabel: 'Tempo',
-          symbol: token.symbol,
-          balance: formatUnits(raw, token.decimals),
-        })
-      }
-    } catch {
-      // Token balance failures should not hide the wallet itself.
-    }
-  }
-  return balances
-}
-
 async function getBalances(address: `0x${string}`): Promise<DashboardWalletBalance[]> {
   const native = await Promise.all(DEFAULT_BALANCE_CHAINS.map((chain) => getNativeBalance(chain, address)))
-  const tempoTokens = await getTempoTokenBalances(address)
-  return [...native, ...tempoTokens].filter((entry) => {
+  return native.filter((entry) => {
     if (entry.error) return true
     const numeric = Number(entry.balance)
     if (!Number.isFinite(numeric) || numeric <= 0) return false

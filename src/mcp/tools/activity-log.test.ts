@@ -61,19 +61,19 @@ const auth: AuthContext = {
 
 test('records manual swap activity for the authenticated dashboard user', async () => {
   await withActivityPath(() => {
-    recordToolActivity('tempo_swap', {
+    recordToolActivity('uniswap', {
       action: 'swap',
       amount: 10,
-      tokenIn: 'USDC.e',
+      tokenIn: 'USDC',
       tokenOut: 'ETH',
     }, {
-      content: [{ type: 'text', text: 'Swapped 10 USDC.e to ETH\nTx: 0x1111111111111111111111111111111111111111111111111111111111111111' }],
+      content: [{ type: 'text', text: 'Swapped 10 USDC to ETH\nTx: 0x1111111111111111111111111111111111111111111111111111111111111111' }],
     }, auth)
 
     const history = listActivityForUser('user_1')
     assert.equal(history.length, 1)
-    assert.equal(history[0].title, 'Swap 10 USDC.e to ETH')
-    assert.equal(history[0].tool, 'tempo_swap')
+    assert.equal(history[0].title, 'Swap 10 USDC to ETH')
+    assert.equal(history[0].tool, 'uniswap')
     assert.equal(history[0].txHash, '0x1111111111111111111111111111111111111111111111111111111111111111')
   })
 })

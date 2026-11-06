@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Agent Memory Engine v2
+ * ./AGENT Protocol — Agent Memory Engine v2
  *
  * Fast in-memory cache + lazy disk persistence.
  * Only reads from disk once on startup; writes are debounced.
@@ -8,10 +8,11 @@
  * Storage: .agnt/memory.enc (AES-256-GCM encrypted)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { dirname, resolve, isAbsolute } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { resolve, isAbsolute } from 'path'
 import { randomUUID } from 'crypto'
 import { encrypt, decrypt, getPassphrase } from './crypto.js'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 
 const DEFAULT_PATH = '.agnt/memory.enc'
 const MAX_MEMORIES = 5000
@@ -108,7 +109,8 @@ function loadFromDisk() {
     }
     _entries = store.entries || []
     rebuildIndex()
-  } catch {
+  } catch (error) {
+    handleStoreReadFailure(`Memory store (${fp})`, error)
     _entries = []
   }
 }
@@ -126,10 +128,8 @@ function scheduleSave() {
 
 function flushToDisk() {
   const fp = resolvePath()
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const json = JSON.stringify({ entries: _entries })
-  writeFileSync(fp, encrypt(json, getPassphrase()), 'utf-8')
+  writePrivateFileAtomicSync(fp, encrypt(json, getPassphrase()))
 }
 
 /** Force an immediate save (for shutdown hooks). */
@@ -429,13 +429,11 @@ export function autoRemember(
   if (resultSnippet) value += ` → ${resultSnippet.slice(0, 200)}`
 
   const tags: string[] = [toolName, action]
-  if (['tempo_swap', 'smart_swap', 'uniswap', 'pancakeswap'].includes(toolName)) tags.push('swap')
-  if (['tempo_bridge', 'relay', 'debridge', 'jumper'].includes(toolName)) tags.push('bridge')
+  if (['smart_swap', 'uniswap', 'pancakeswap'].includes(toolName)) tags.push('swap')
+  if (['relay', 'jumper'].includes(toolName)) tags.push('bridge')
   if (['aave', 'morpho'].includes(toolName)) tags.push('lending')
-  if (['hyperliquid'].includes(toolName)) tags.push('perps')
-  if (['lido', 'eigenlayer', 'pendle', 'ethena', 'ondo'].includes(toolName)) tags.push('yield')
+  if (['lido', 'pendle', 'ethena', 'ondo'].includes(toolName)) tags.push('yield')
   if (['payment'].includes(toolName)) tags.push('payment')
-  if (['polymarket'].includes(toolName)) tags.push('prediction')
   if (context.walletAddress) tags.push(`wallet:${context.walletAddress.toLowerCase()}`)
   if (context.walletName) tags.push(`wallet_name:${context.walletName.toLowerCase()}`)
 

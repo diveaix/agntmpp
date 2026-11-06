@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Wallet Encryption
+ * ./AGENT Protocol — Wallet Encryption
  * AES-256-GCM encryption for wallet private keys at rest.
  */
 
@@ -42,6 +42,14 @@ export function decrypt(encoded: string, passphrase: string): string {
 
 /** Get the encryption passphrase from env or generate a machine-specific one. */
 export function getPassphrase(): string {
-  if (process.env.AGNT_PASSPHRASE) return process.env.AGNT_PASSPHRASE
+  if (process.env.AGNT_PASSPHRASE) {
+    if (process.env.NODE_ENV === 'production' && process.env.AGNT_PASSPHRASE.length < 32) {
+      throw new Error('AGNT_PASSPHRASE must be at least 32 characters in production.')
+    }
+    return process.env.AGNT_PASSPHRASE
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('AGNT_PASSPHRASE is required in production; machine-derived encryption keys are not allowed.')
+  }
   return `agnt:${hostname()}:${userInfo().username}`
 }

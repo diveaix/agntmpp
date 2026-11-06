@@ -10,8 +10,8 @@ export interface AutomationEntitlement {
 
 const ENTITLEMENTS: Record<AutomationPlan, AutomationEntitlement> = {
   free: { plan: 'free', dataAutomationSlots: 1, customSourceSlots: 0, autoExecuteAllowed: false, priorityQueue: false },
-  pro: { plan: 'pro', dataAutomationSlots: 5, customSourceSlots: 25, autoExecuteAllowed: true, priorityQueue: false },
-  max: { plan: 'max', dataAutomationSlots: 30, customSourceSlots: 100, autoExecuteAllowed: true, priorityQueue: true },
+  pro: { plan: 'pro', dataAutomationSlots: 5, customSourceSlots: 25, autoExecuteAllowed: false, priorityQueue: false },
+  max: { plan: 'max', dataAutomationSlots: 30, customSourceSlots: 100, autoExecuteAllowed: false, priorityQueue: true },
 }
 
 export function getPlanEntitlement(plan: AutomationPlan | string | undefined): AutomationEntitlement {

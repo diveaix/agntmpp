@@ -1,256 +1,156 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useReducedMotion } from 'framer-motion'
+import Nav from '../components/Nav'
 import '../waitlist.css'
-
-const XIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>
-)
-
-const TelegramIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" /></svg>
-)
 
 export default function WaitlistPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const cardRef = useRef<HTMLElement>(null)
+  const terminalRef = useRef<HTMLElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const [waitlistActive, setWaitlistActive] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState(false)
+  const reducedMotion = useReducedMotion()
+  const [email, setEmail] = useState('')
+  const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle')
 
-  /* Character Spotlight */
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')!
-    const chars = '$ # @ % ^ & * { } [ ] < > / \\ | ~ ? ! + = - _ : ; . , 0 1 2 3 4 5 6 7 8 9 a b c d e f'.split(' ')
-    const cellSize = 22
-    let cols = 0, rows = 0, grid: string[][] = []
-    let mouseX = -9999, mouseY = -9999
-    const radius = 220
-    let raf: number
-
-    function buildGrid() {
-      canvas.width = window.innerWidth
-      canvas.height = window.innerHeight
-      cols = Math.ceil(canvas.width / cellSize) + 1
-      rows = Math.ceil(canvas.height / cellSize) + 1
-      grid = []
-      for (let i = 0; i < rows; i++) {
-        const row: string[] = []
-        for (let j = 0; j < cols; j++) {
-          row.push(chars[Math.floor(Math.random() * chars.length)])
-        }
-        grid.push(row)
-      }
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx || reducedMotion) return
+    const chars = './AGENT01{}[]<>/+#%$:=;'
+    const cell = 24, radius = 200
+    let width = 0, height = 0, frame = 0
+    let x = -1000, y = -1000
+    const clear = () => {
+      cancelAnimationFrame(frame)
+      frame = 0
+      ctx.clearRect(0, 0, width, height)
     }
-
-    buildGrid()
-    window.addEventListener('resize', buildGrid)
-
-    const onMove = (e: MouseEvent) => { mouseX = e.clientX; mouseY = e.clientY }
-    document.addEventListener('mousemove', onMove)
-
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.font = '11px "JetBrains Mono", monospace'
+    const resize = () => {
+      width = window.innerWidth
+      height = window.innerHeight
+      const ratio = Math.min(window.devicePixelRatio || 1, 2)
+      canvas.width = width * ratio
+      canvas.height = height * ratio
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+      clear()
+    }
+    const draw = () => {
+      frame = 0
+      ctx.clearRect(0, 0, width, height)
+      ctx.font = '11px Consolas, monospace'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-
-      for (let k = 0; k < 60; k++) {
-        const r = Math.floor(Math.random() * rows)
-        const c = Math.floor(Math.random() * cols)
-        if (grid[r]) grid[r][c] = chars[Math.floor(Math.random() * chars.length)]
-      }
-
-      for (let i = 0; i < rows; i++) {
-        for (let j = 0; j < cols; j++) {
-          const x = j * cellSize + cellSize / 2
-          const y = i * cellSize + cellSize / 2
-          const dx = x - mouseX
-          const dy = y - mouseY
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < radius) {
-            const alpha = (1 - dist / radius) * 0.18
-            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
-            ctx.fillText(grid[i][j], x, y)
-          }
+      const left = Math.max(0, Math.floor((x - radius) / cell))
+      const right = Math.min(Math.ceil(width / cell), Math.ceil((x + radius) / cell))
+      const top = Math.max(0, Math.floor((y - radius) / cell))
+      const bottom = Math.min(Math.ceil(height / cell), Math.ceil((y + radius) / cell))
+      for (let row = top; row <= bottom; row++) {
+        for (let col = left; col <= right; col++) {
+          const px = col * cell + cell / 2, py = row * cell + cell / 2
+          const distance = Math.hypot(px - x, py - y)
+          if (distance >= radius) continue
+          ctx.fillStyle = `rgba(190,190,187,${(1 - distance / radius) ** 2 * .19})`
+          ctx.fillText(chars[(row * 31 + col * 17) % chars.length], px, py)
         }
       }
-      raf = requestAnimationFrame(draw)
     }
-    draw()
-
+    const move = (event: globalThis.PointerEvent) => {
+      if (event.pointerType === 'touch' || document.hidden) return
+      x = event.clientX
+      y = event.clientY
+      if (!frame) frame = requestAnimationFrame(draw)
+    }
+    resize()
+    window.addEventListener('resize', resize)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('blur', clear)
+    document.documentElement.addEventListener('pointerleave', clear)
+    document.addEventListener('visibilitychange', clear)
     return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('resize', buildGrid)
-      document.removeEventListener('mousemove', onMove)
+      clear()
+      window.removeEventListener('resize', resize)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('blur', clear)
+      document.documentElement.removeEventListener('pointerleave', clear)
+      document.removeEventListener('visibilitychange', clear)
     }
-  }, [])
+  }, [reducedMotion])
 
-  /* Terminal Tilt */
-  useEffect(() => {
-    const el = cardRef.current
-    if (!el) return
-    const maxTilt = 12
+  function activate() {
+    inputRef.current?.focus({ preventScroll: true })
+    terminalRef.current?.scrollIntoView({ behavior: reducedMotion ? 'instant' : 'smooth', block: 'center' })
+  }
 
-    const onMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect()
-      const x = (e.clientX - rect.left) / rect.width
-      const y = (e.clientY - rect.top) / rect.height
-      const ry = (x - 0.5) * maxTilt * 2
-      const rx = (0.5 - y) * maxTilt * 2
-      el.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`
+  async function subscribe(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (status === 'sending' || status === 'success') return
+    setStatus('sending')
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 15000)
+    try {
+      const response = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), source: 'agnt-updates' }),
+        signal: controller.signal,
+      })
+      const result: { ok?: boolean } = await response.json()
+      if (!response.ok || result.ok !== true) throw new Error('Subscription failed')
+      setStatus('success')
+    } catch {
+      setStatus('error')
+    } finally {
+      window.clearTimeout(timeout)
     }
-
-    const onLeave = () => {
-      el.style.transition = 'transform .5s cubic-bezier(.4,0,.2,1)'
-      el.style.transform = 'rotateX(0) rotateY(0)'
-      setTimeout(() => { el.style.transition = 'transform .15s ease, box-shadow .3s ease' }, 500)
-    }
-
-    const onEnter = () => {
-      el.style.transition = 'transform .15s ease, box-shadow .3s ease'
-    }
-
-    el.addEventListener('mousemove', onMove)
-    el.addEventListener('mouseleave', onLeave)
-    el.addEventListener('mouseenter', onEnter)
-
-    return () => {
-      el.removeEventListener('mousemove', onMove)
-      el.removeEventListener('mouseleave', onLeave)
-      el.removeEventListener('mouseenter', onEnter)
-    }
-  }, [])
-
-  /* Waitlist Activate */
-  const activateWaitlist = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    if (submitted) return
-    setWaitlistActive(true)
-    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setTimeout(() => inputRef.current?.focus(), 600)
-  }, [submitted])
-
-  /* Waitlist Submit */
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || submitted) return
-    const email = (e.target as HTMLInputElement).value.trim()
-    if (!email || !email.includes('@')) {
-      setError(true)
-      setTimeout(() => setError(false), 600)
-      return
-    }
-    setSubmitted(true)
-  }, [submitted])
+  }
 
   return (
     <div className="wl-page">
-      <canvas ref={canvasRef} className="wl-spotlight" />
-
-      {/* Nav */}
-      <nav className="wl-nav" aria-label="Primary">
-        <Link to="/" className="wl-nav-logo">
-          <img src="/AGNT.svg" alt="AGNT" className="wl-nav-mark" />
-          <span>AGNT</span>
-        </Link>
-        <div className="wl-nav-links">
-          <a
-            className={`wl-nav-link wl-nav-link--primary${submitted ? ' wl-disabled' : ''}`}
-            href="#"
-            onClick={activateWaitlist}
-          >
-            {submitted ? 'Joined' : 'Request Access'}
-          </a>
-        </div>
-      </nav>
-
-      {/* Main */}
+      <canvas ref={canvasRef} className="wl-spotlight" aria-hidden="true" />
+      <Nav />
       <main className="wl-main">
-        <section className="wl-shell">
-
-          {/* Left: Hero */}
+        <section className="wl-shell" aria-labelledby="waitlist-title">
           <div className="wl-hero">
-            <h1>
-              <span className="glitch-word" data-text="AGENTS">AGENTS</span><br />
-              DON'T<br />
-              <span className="glitch-word" data-text="SLEEP">SLEEP</span>
-            </h1>
-
-            <p className="wl-lead">
-              <mark>./AGNT</mark> is getting ready. The financial layer for autonomous agents -
-              wallets, swaps, perps, bridges, automations, and payments - is almost here.
-            </p>
-
-            <div className="wl-actions">
-              <a
-                className={`wl-button${submitted ? ' wl-disabled' : ''}`}
-                href="#"
-                onClick={activateWaitlist}
-              >
-                {submitted ? "You're on the list" : 'Request Early Access'}
-              </a>
-            </div>
-
+            <h1 id="waitlist-title">AGENTS<br /><span>DON'T</span><br />SLEEP</h1>
+            <p className="wl-lead">The execution layer for your agent. Wallets, transfers, and onchain actions through one MCP connection.</p>
+            <div className="wl-actions"><button className="wl-button" type="button" onClick={activate} disabled={status === 'success'} aria-controls="waitlist-signup">{status === 'success' ? "You're on the list" : 'Join the waitlist'}<span aria-hidden="true">↗</span></button></div>
             <div className="wl-metrics">
-              <div className="wl-metric"><strong>100+</strong><span>Agent Tools</span></div>
-              <div className="wl-metric"><strong>24/7</strong><span>Automation</span></div>
-              <div className="wl-metric"><strong>MCP</strong><span>One URL</span></div>
-              <div className="wl-metric"><strong>20+</strong><span>Protocols</span></div>
+              <div><strong>Zcash</strong><span>Shielded wallet</span></div>
+              <div><strong>EVM</strong><span>Multichain</span></div>
+              <div><strong>NEAR</strong><span>Native account</span></div>
+              <div><strong>MCP</strong><span>One connection</span></div>
             </div>
           </div>
 
-          {/* Right: Terminal */}
           <div className="wl-terminal-wrap">
-            <aside className="wl-terminal" ref={cardRef}>
+            <aside className="wl-terminal" ref={terminalRef} aria-label="AGENT waitlist terminal">
               <div className="wl-terminal-header">
-                <div className="wl-terminal-dots"><span /><span /><span /></div>
-                <div className="wl-terminal-title">agnt://boot</div>
+                <div className="wl-terminal-dots" aria-hidden="true"><span /><span /><span /></div>
+                <span className="wl-terminal-title">agent://boot</span>
               </div>
               <div className="wl-terminal-body">
-                <div className="wl-line"><span className="wl-prompt">$</span> initialize agnt-protocol</div>
-                <div className="wl-line"><span className="wl-ok">OK</span> wallet scope hardening</div>
-                <div className="wl-line"><span className="wl-ok">OK</span> exact token approvals</div>
-                <div className="wl-line"><span className="wl-ok">OK</span> route loss guards</div>
-                <div className="wl-line"><span className="wl-ok">OK</span> fast event verifier</div>
-                <div className="wl-line"><span className="wl-dim">WAIT</span> hosted access rollout</div>
-                <div className="wl-line"><span className="wl-dim">WAIT</span> production smoke tests</div>
-                <div className="wl-line"><span className="wl-w">STATUS</span> coming soon</div>
-
-                {/* Waitlist input */}
-                <div className={`wl-input-line${waitlistActive ? ' show' : ''}`}>
-                  <span className="wl-prompt">$</span>&nbsp;
-                  <input
-                    ref={inputRef}
-                    className="wl-email-input"
-                    type="email"
-                    placeholder="enter your email"
-                    autoComplete="email"
-                    disabled={submitted}
-                    onKeyDown={handleKeyDown}
-                    style={error ? { color: '#ff5f57' } : submitted ? { color: 'var(--g4)' } : undefined}
-                  />
+                <p className="wl-command"><span className="wl-prompt" aria-hidden="true">$</span> initialize ./agent</p>
+                <div className="wl-terminal-lines" aria-label="AGENT capabilities">
+                  <p><span>ZEC</span> shielded Zcash wallet</p>
+                  <p><span>EVM</span> one wallet, multiple chains</p>
+                  <p><span>NEAR</span> native account connection</p>
+                  <p><span>KEYS</span> user-controlled signing</p>
+                  <p><span>MCP</span> instruction to execution</p>
                 </div>
-                {submitted && (
-                  <div className="wl-confirm"><span className="wl-ok">OK</span> added to waitlist - we'll be in touch</div>
-                )}
+                <div className="wl-terminal-invite"><p>Stay close to what's next.</p><span>Product releases. New connections.</span></div>
+                <div id="waitlist-signup" className="wl-signup">
+                  {status === 'success' ? <div className="wl-confirm" role="status"><span>✓</span><div><strong>You're on the list.</strong><p>We'll be in touch at {email.trim()}.</p></div></div> : <form onSubmit={subscribe}>
+                    <label htmlFor="waitlist-email"><span className="wl-prompt" aria-hidden="true">$</span> join --email</label>
+                    <div className="wl-input-line"><span className="wl-prompt" aria-hidden="true">›</span><input ref={inputRef} id="waitlist-email" className="wl-email-input" type="email" name="email" autoComplete="email" aria-label="Your email address" placeholder="you@example.com" required maxLength={320} value={email} onChange={event => { setEmail(event.target.value); if (status === 'error') setStatus('idle') }} disabled={status === 'sending'} aria-describedby={status === 'error' ? 'waitlist-error' : 'waitlist-note'} /><button type="submit" aria-label="Join the waitlist with this email" disabled={status === 'sending'}><span>{status === 'sending' ? 'Joining…' : 'Join'}</span><span aria-hidden="true">↵</span></button></div>
+                    {status === 'error' && <p id="waitlist-error" className="wl-error" role="alert">Couldn't save your email. Please try again.</p>}
+                    <p id="waitlist-note" className="wl-input-note">By joining, you agree to receive ./AGENT product emails.</p>
+                  </form>}
+                </div>
               </div>
             </aside>
           </div>
-
         </section>
+        <div className="wl-footer"><span>Built by agents, for agents.</span><div><a href="https://x.com/dotslashagent" target="_blank" rel="noopener noreferrer">X ↗</a><a href="https://t.me/+SzRhx6BZxtI2YWQ1" target="_blank" rel="noopener noreferrer">Telegram ↗</a></div></div>
       </main>
-
-      {/* Footer */}
-      <footer className="wl-footer">
-        <a className="wl-social" href="https://x.com/agntmpp" target="_blank" rel="noopener noreferrer" aria-label="X (Twitter)">
-          <XIcon />
-        </a>
-        <a className="wl-social" href="https://t.me/+SzRhx6BZxtI2YWQ1" target="_blank" rel="noopener noreferrer" aria-label="Telegram">
-          <TelegramIcon />
-        </a>
-      </footer>
     </div>
   )
 }

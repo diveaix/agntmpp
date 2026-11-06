@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { dirname, resolve, isAbsolute } from 'path'
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { encrypt, decrypt, getPassphrase } from './crypto.js'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 import { getPlanEntitlement } from './automation-entitlements.js'
 import type {
   AccessApiKey,
@@ -112,16 +113,15 @@ export function loadAccessStore(custom?: string): AccessStore {
       customSources: Array.isArray(parsed.customSources) ? parsed.customSources : [],
       processedWebhookEventIds: Array.isArray(parsed.processedWebhookEventIds) ? parsed.processedWebhookEventIds : [],
     } as AccessStore
-  } catch {
+  } catch (error) {
+    handleStoreReadFailure('Access store', error)
     return cloneDefaultStore()
   }
 }
 
 export function saveAccessStore(store: AccessStore, custom?: string): void {
   const fp = resolveAccessPath(custom)
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(fp, encrypt(JSON.stringify(store, null, 2), getPassphrase()), 'utf-8')
+  writePrivateFileAtomicSync(fp, encrypt(JSON.stringify(store, null, 2), getPassphrase()))
 }
 
 export function createUser(input: { email?: string; walletAddress?: string; status?: AccessUser['status'] } = {}, custom?: string): AccessUser {
@@ -644,7 +644,7 @@ export function createCustomSource(userId: string, input: {
   const handle = normalizeSourceHandle(input.handle)
   if (!handle) throw new Error('Twitter/X handle is required.')
   const topics = normalizeStringList(input.topics)
-  if (topics.length === 0) throw new Error('Add at least one topic so AGNT knows when to poll this source.')
+  if (topics.length === 0) throw new Error('Add at least one topic so AGENT knows when to poll this source.')
   if (ownedSources.some((source) => source.handle.toLowerCase() === handle.toLowerCase())) {
     throw new Error('This source is already in your list.')
   }
@@ -674,7 +674,7 @@ export function updateCustomSource(userId: string, sourceId: string, patch: Part
   if (patch.displayName !== undefined) source.displayName = patch.displayName.trim() || undefined
   if (patch.topics !== undefined) {
     const topics = normalizeStringList(patch.topics)
-    if (topics.length === 0) throw new Error('Add at least one topic so AGNT knows when to poll this source.')
+    if (topics.length === 0) throw new Error('Add at least one topic so AGENT knows when to poll this source.')
     source.topics = topics
   }
   if (patch.keywords !== undefined) source.keywords = normalizeStringList(patch.keywords)

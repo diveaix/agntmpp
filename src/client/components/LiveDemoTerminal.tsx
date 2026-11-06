@@ -15,70 +15,31 @@ interface DemoGroup {
 
 const GROUPS: DemoGroup[] = [
   {
-    user: 'Create a wallet called "Alpha Fund" and check what tokens are available',
+    user: 'Create a wallet called "Alpha Fund" for Base',
     tools: [
-      { badge: 'wallet_create', args: 'name="Alpha Fund"' },
-      { badge: 'tempo_tokens', args: 'action="list"' },
+      { badge: 'wallet', args: 'action="create" name="Alpha Fund" chain="base"' },
     ],
     responseLines: [
       { k: 'ok', t: '[ok] Wallet "Alpha Fund" created' },
       { k: 't', t: '  Address: 0xa1b2...c3d4' },
-      { k: 't', t: '  Chain: Tempo (4217)' },
-      { k: 'br' },
-      { k: 't', t: '  Available tokens:' },
-      { k: 't', t: '  USDC.e    $1.00   [stablecoin]' },
-      { k: 't', t: '  EURC.e    $1.08   [stablecoin]' },
-      { k: 't', t: '  wETH      $3,841  [altcoin]' },
-      { k: 't', t: '  AGNT      $0.0012 [memecoin]' },
+      { k: 't', t: '  Chain: Base (8453)' },
     ],
   },
   {
-    user: 'Swap 500 USDC.e for wETH — show me the fees first',
-    tools: [{ badge: 'tempo_swap', args: 'tokenIn="USDC.e" tokenOut="wETH" amount=500' }],
+    user: 'What is the price of ETH?',
+    tools: [{ badge: 'market_data', args: 'action="price" token="ETH"' }],
     responseLines: [
-      { k: 'dim', t: 'Swap Quote:' },
-      { k: 't', t: '  500 USDC.e → 0.13017 wETH' },
-      { k: 't', t: '  Rate: 1 USDC.e = 0.00026 wETH' },
-      { k: 't', t: '  DEX Fee: 0.25 USDC.e (0.05%)' },
-      { k: 't', t: '  Slippage: 0.5% max' },
-      { k: 't', t: '  Gas: ~0.001 USD' },
-      { k: 'br' },
-      { k: 'ok', t: '[ok] Swap complete' },
-      { k: 't', t: '  Tx: tempo.build/tx/0xf7a2...' },
+      { k: 'dim', t: 'Illustrative market snapshot:' },
+      { k: 't', t: '  ETH: $3,841' },
+      { k: 't', t: '  24h change: +1.2%' },
+      { k: 't', t: '  Source: CoinGecko' },
     ],
   },
   {
-    user: 'Long BTC at market, 10x leverage, 0.5 BTC size',
-    tools: [{ badge: 'hl_order', args: 'market="BTC" side="buy" size=0.5 leverage=10' }],
+    user: 'Remember that I want to review fees before every transfer',
+    tools: [{ badge: 'memory', args: 'action="remember" key="transfer_preferences" value="Review fees before every transfer"' }],
     responseLines: [
-      { k: 'ok', t: '[ok] Order Placed — Hyperliquid BTC-PERP' },
-      { k: 't', t: '  Side: BUY (Long) | Size: 0.5 BTC' },
-      { k: 't', t: '  Type: Market @ ~$104,180' },
-      { k: 't', t: '  Leverage: 10x' },
-      { k: 't', t: '  Notional: $52,090' },
-      { k: 't', t: '  Margin: $5,209 | Est. Liq: $93,762' },
-    ],
-  },
-  {
-    user: 'Set up a DCA — buy $100 of wETH every 6 hours',
-    tools: [{ badge: 'create_dca', args: 'tokenIn="USDC.e" tokenOut="wETH" amount=100 interval="6h"' }],
-    responseLines: [
-      { k: 'ok', t: '[ok] DCA Strategy Created' },
-      { k: 't', t: '  Buy 100 USDC.e → wETH' },
-      { k: 't', t: '  Every 6 hours' },
-      { k: 't', t: '  Next run: 2026-04-30 18:00' },
-      { k: 'br' },
-      { k: 'inline', dim: '[memory] Saved:', rest: ' DCA strategy for wETH' },
-    ],
-  },
-  {
-    user: 'What trades did I do last week?',
-    tools: [{ badge: 'memory_recall', args: 'query="trades last week"' }],
-    responseLines: [
-      { k: 'dim', t: 'Trade History (last 7 days):' },
-      { k: 't', t: '  1. swap: 500 USDC.e → 0.13 wETH' },
-      { k: 't', t: '  2. dca: 100 USDC.e → wETH (x4 runs)' },
-      { k: 't', t: '  3. perp: BTC-PERP long 0.5 @ $104,180' },
+      { k: 'inline', dim: '[memory] Saved:', rest: ' Review fees before every transfer' },
       { k: 't', t: '  [source] Agent Memory (encrypted)' },
     ],
   },
@@ -212,7 +173,7 @@ export default function LiveDemoTerminal({ isOpen }: { isOpen: boolean }) {
     <div className="ld-terminal">
       <div className="ld-terminal-header">
         <div className="ld-terminal-dots"><span /><span /><span /></div>
-        <div className="ld-terminal-title">AGNT — ~/projects/alpha-fund</div>
+        <div className="ld-terminal-title">AGENT — illustrative EVM demo</div>
       </div>
       <div className={`ld-terminal-body${boot ? ' ld-boot' : ''}`} ref={bodyRef}>
         {GROUPS.map((g, gi) => {

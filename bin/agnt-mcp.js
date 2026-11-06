@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * ./AGNT MCP Server — npx entrypoint
+ * ./AGENT MCP Server — npx entrypoint
  * Usage: npx @agnt/mcp
  */
-import('../src/mcp/server.ts')
+import 'tsx/esm'
+await import('../src/mcp/server.ts')

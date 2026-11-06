@@ -4,7 +4,7 @@ import { classifyTxError, formatTxError } from '../tx-errors.js'
 
 test('formats missing wallet errors in plain English', () => {
   assert.match(
-    classifyTxError(new Error('No active AGNT wallet is selected.')),
+    classifyTxError(new Error('No active AGENT wallet is selected.')),
     /No active wallet is selected/,
   )
 })

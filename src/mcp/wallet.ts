@@ -1,14 +1,15 @@
 /**
- * ./AGNT Protocol — Multi-Wallet Management (Encrypted)
+ * ./AGENT Protocol — Multi-Wallet Management (Encrypted)
  * AES-256-GCM encrypted storage with named wallets.
  */
 
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { dirname, resolve, isAbsolute } from 'path'
 import { createHash } from 'crypto'
 import { encrypt, decrypt, getPassphrase } from './crypto.js'
 import { getCurrentWalletScope } from './tool-context.js'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 
 export interface WalletEntry {
   name: string
@@ -60,18 +61,17 @@ function loadStore(custom?: string): WalletStore {
     }
     const json = decrypt(raw, getPassphrase())
     return JSON.parse(json) as WalletStore
-  } catch {
+  } catch (error) {
+    handleStoreReadFailure('EVM wallet store', error)
     return { wallets: [], activeIndex: 0 }
   }
 }
 
 function saveStore(store: WalletStore, custom?: string) {
   const fp = resolvePath(custom)
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const json = JSON.stringify(store, null, 2)
   const encrypted = encrypt(json, getPassphrase())
-  writeFileSync(fp, encrypted, 'utf-8')
+  writePrivateFileAtomicSync(fp, encrypted)
 }
 
 /** Create a new named wallet. */
@@ -105,7 +105,7 @@ export function getActiveWallet(custom?: string): WalletEntry | null {
 export function getOrCreateWallet(name?: string, custom?: string): WalletEntry {
   const wallet = getActiveWallet(custom)
   if (!wallet) {
-    throw new Error('No active AGNT wallet is selected. Create or switch to a user wallet before executing transactions.')
+    throw new Error('No active AGENT wallet is selected. Create or switch to a user wallet before executing transactions.')
   }
   return wallet
 }

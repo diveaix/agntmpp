@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.agnt/
+.npm-cache*/
+dist/
+wallet-recovery-output/
+*.enc
+*.log
+*.test.ts
+.git/
+.github/

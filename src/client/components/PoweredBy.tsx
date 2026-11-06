@@ -1,54 +1,81 @@
 /**
- * Infinite-scroll logo treadmill — inspired by fun.xyz
- * Two identical tracks stacked, scrolling in opposite directions
- * for a premium "living" feel.
+ * Two continuous logo belts moving in opposite directions.
  */
+
+import { useLayoutEffect, useRef, useState } from 'react'
 
 interface Protocol {
   name: string
   logo: string
-  url: string
+  label?: boolean
 }
 
 const ROW_1: Protocol[] = [
-  { name: 'Tempo', logo: '/tempo.svg', url: 'https://tempo.xyz/' },
-  { name: 'Hyperliquid', logo: '/hyperliquid.svg', url: 'https://hyperliquid.xyz/' },
-  { name: 'Uniswap', logo: '/uniswap.svg', url: 'https://uniswap.org/' },
-  { name: 'Aave', logo: '/Aave.svg', url: 'https://aave.com/' },
-  { name: 'Lido', logo: '/Lido.svg', url: 'https://lido.fi/' },
-  { name: 'EigenLayer', logo: '/eigen.svg', url: 'https://www.eigenlayer.xyz/' },
-  { name: 'Ethena', logo: '/ethena.svg', url: 'https://ethena.fi/' },
-  { name: 'Morpho', logo: '/morpho.svg', url: 'https://morpho.org/' },
-  { name: 'PancakeSwap', logo: '/pancakeswap.svg', url: 'https://pancakeswap.finance/' },
+  { name: 'Uniswap', logo: '/uniswap.svg' },
+  { name: 'Zcash', logo: '/zcash.svg' },
+  { name: 'Aave', logo: '/Aave.svg' },
+  { name: 'Lido', logo: '/Lido.svg' },
+  { name: 'Ethena', logo: '/ethena.svg' },
+  { name: 'Morpho', logo: '/morpho.svg' },
+  { name: 'PancakeSwap', logo: '/pancakeswap.svg' },
+  { name: 'Ethereum', logo: '/chains/ethereum.png', label: true },
+  { name: 'BNB Chain', logo: '/chains/bnb.png', label: true },
+  { name: 'Robinhood', logo: '/chains/robinhood.png', label: true },
+  { name: 'Arc', logo: '/chains/arc.png', label: true },
+  { name: 'NEAR', logo: '/chains/near.png', label: true },
 ]
 
 const ROW_2: Protocol[] = [
-  { name: 'Ondo', logo: '/ondo.svg', url: 'https://ondo.finance/' },
-  { name: 'Polymarket', logo: '/polymarket-logo.svg', url: 'https://polymarket.com/' },
-  { name: 'Stargate', logo: '/stargate.svg', url: 'https://stargate.finance/' },
-  { name: 'LI.FI', logo: '/lifi.svg', url: 'https://li.fi/' },
-  { name: 'Jumper', logo: '/jumper.svg', url: 'https://jumper.exchange/' },
-  { name: 'deBridge', logo: '/debridge.svg', url: 'https://debridge.finance/' },
-  { name: 'Relay', logo: '/relay.svg', url: 'https://relay.link/' },
-  { name: 'Dune', logo: '/Dune.svg', url: 'https://dune.com/' },
+  { name: 'Ondo', logo: '/ondo.svg' },
+  { name: 'LI.FI', logo: '/lifi.svg' },
+  { name: 'Jumper', logo: '/jumper.svg' },
+  { name: 'Relay', logo: '/relay.svg' },
+  { name: 'Optimism', logo: '/chains/optimism.png', label: true },
+  { name: 'Arbitrum', logo: '/chains/arbitrum.png', label: true },
+  { name: 'Base', logo: '/chains/base.png', label: true },
+  { name: 'Polygon', logo: '/chains/polygon.png', label: true },
+  { name: 'Avalanche', logo: '/chains/avalanche.png', label: true },
 ]
 
-function LogoTrack({ items, direction }: { items: Protocol[]; direction: 'left' | 'right' }) {
-  const doubled = [...items, ...items]
+function LogoTrack({ items }: { items: Protocol[] }) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [repetitions, setRepetitions] = useState(1)
+
+  useLayoutEffect(() => {
+    const track = trackRef.current
+    const group = track?.firstElementChild
+    const viewport = track?.parentElement
+    if (!track || !group || !viewport) return
+
+    // Equal pixels per second even when the rows have different widths.
+    const updateSpeed = () => {
+      const slotWidth = group.firstElementChild?.getBoundingClientRect().width || 200
+      setRepetitions(Math.max(1, Math.ceil(viewport.clientWidth / (items.length * slotWidth))))
+      track.style.setProperty('--pb-duration', `${group.getBoundingClientRect().width / 44}s`)
+    }
+    updateSpeed()
+    const observer = new ResizeObserver(updateSpeed)
+    observer.observe(group)
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [items.length])
+
   return (
-    <div className={`pb-track pb-track--${direction}`}>
-      <div className="pb-track-inner">
-        {doubled.map((p, i) => (
-          <a
-            key={`${p.name}-${i}`}
-            className="pb-logo-item"
-            href={p.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={p.name}
-          >
-            <img src={p.logo} alt={p.name} className="pb-logo" loading="lazy" />
-          </a>
+    <div className="pb-track">
+      <div className="pb-track-inner" ref={trackRef}>
+        {[0, 1].map(copy => (
+          <div className="pb-track-group" key={copy} aria-hidden={copy === 1 ? true : undefined}>
+            {Array.from({ length: repetitions }, (_, repeat) => items.map(p => (
+              <div
+                key={`${repeat}-${p.name}`}
+                className="pb-logo-item"
+                aria-hidden={repeat > 0 ? true : undefined}
+              >
+                <img src={p.logo} alt={p.label ? '' : p.name} className={p.label ? 'pb-logo pb-chain-icon' : 'pb-logo'} draggable={false} />
+                {p.label && <span className="pb-chain-name">{p.name}</span>}
+              </div>
+            )))}
+          </div>
         ))}
       </div>
     </div>
@@ -58,10 +85,10 @@ function LogoTrack({ items, direction }: { items: Protocol[]; direction: 'left' 
 export default function PoweredBy() {
   return (
     <section className="pb-section" id="powered-by">
-      <div className="pb-label">Powered By</div>
+      <div className="pb-label">Chains &amp; Protocols</div>
       <div className="pb-treadmill">
-        <LogoTrack items={ROW_1} direction="left" />
-        <LogoTrack items={ROW_2} direction="right" />
+        <LogoTrack items={ROW_1} />
+        <LogoTrack items={ROW_2} />
       </div>
     </section>
   )

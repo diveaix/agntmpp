@@ -1,4 +1,4 @@
-export type AutomationMode = 'notify_only' | 'ask_first' | 'auto_execute' | 'emergency_paused'
+export type AutomationMode = 'notify_only' | 'emergency_paused'
 
 export type AutomationPlan = 'free' | 'pro' | 'max'
 
@@ -93,42 +93,14 @@ export interface GrokVerificationResult {
   reason: string
 }
 
-export interface AutomationPolicy {
-  maxTradeSizeUsd?: number
-  maxDailySpend?: number
-  maxDailyLoss?: number
-  maxLeverage?: number
-  maxSlippagePercent?: number
-  maxPolymarketPrice?: number
-  requireStopLoss?: boolean
-  cooldownSeconds?: number
+export interface EventAutomationAction {
+  kind: 'notify'
+  message?: string
 }
-
-export interface PolymarketEventAction {
-  protocol: 'polymarket'
-  marketId: string
-  side: 'YES' | 'NO'
-  maxSpend: number
-  maxPrice?: number
-}
-
-export interface HyperliquidTradeAction {
-  protocol: 'hyperliquid'
-  kind: 'trade'
-  market: string
-  side: 'long' | 'short'
-  amountUsd: number
-  leverage: number
-  stopLossPercent?: number
-  takeProfitPercent?: number
-}
-
-export type EventAutomationAction = PolymarketEventAction | HyperliquidTradeAction
 
 export interface EventTriggerAutomationParams {
   trigger: UniversalEventTrigger
   action: EventAutomationAction
-  policy: AutomationPolicy
   mode: AutomationMode
   verificationMode?: 'speed' | 'balanced' | 'fortress'
   actionReady?: boolean
@@ -137,55 +109,16 @@ export interface EventTriggerAutomationParams {
   validFor: string
 }
 
-export type HyperliquidInfoMetric =
-  | 'funding_rate'
-  | 'open_interest'
-  | 'volume'
-  | 'liquidation_risk'
-  | 'account_margin'
-  | 'position_pnl'
-  | 'order_fill'
-  | 'vault_performance'
-  | 'staking_validator'
-  | 'spot_market'
-
-export interface HyperliquidInfoMonitorParams {
-  trigger: {
-    protocol: 'hyperliquid'
-    metric: HyperliquidInfoMetric
-    market?: string
-    condition: 'above' | 'below' | 'changes'
-    threshold?: number
-  }
-  action: {
-    kind: 'notify' | 'ask' | 'defensive_action'
-    message: string
-  }
-  policy: AutomationPolicy
-  mode: AutomationMode
-  validUntil: string
-  validFor: string
-}
-
-export interface SimulationResult {
-  ok: boolean
-  protocol: 'polymarket' | 'hyperliquid'
-  summary: string
-  estimatedCostUsd?: number
-  estimatedSlippagePercent?: number
-  warnings: string[]
-  blocks: string[]
-}
-
-export interface PolicyDecision {
-  allowed: boolean
-  mode: AutomationMode
-  reason: string
+export function isNotificationEvent(params: Record<string, unknown>): boolean {
+  const action = params.action as Record<string, unknown> | undefined
+  return action?.kind === 'notify' && action.protocol === undefined &&
+    (params.mode === 'notify_only' || params.mode === 'emergency_paused')
 }
 
 export function normalizeAutomationMode(value: unknown): AutomationMode {
-  if (value === 'ask_first' || value === 'auto_execute' || value === 'emergency_paused' || value === 'notify_only') return value
-  return 'notify_only'
+  if (value === undefined || value === 'notify_only') return 'notify_only'
+  if (value === 'emergency_paused') return value
+  throw new Error('Only notification automation modes are supported.')
 }
 
 export function parseAutomationValidity(value: unknown, now = Date.now()): { validFor: string; validUntil: string; durationMs: number } {

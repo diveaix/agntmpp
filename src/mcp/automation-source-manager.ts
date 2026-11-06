@@ -1,5 +1,5 @@
 import type { AutomationEntry } from './scheduler.js'
-import { isAutomationStillValid, type EventTriggerAutomationParams, type TopicRule, type TweetSourceMeta } from './automation-types.js'
+import { isNotificationEvent, isAutomationStillValid, type EventTriggerAutomationParams, type TopicRule, type TweetSourceMeta } from './automation-types.js'
 import { buildTopicRule } from './automation-tags.js'
 import { listCustomSources } from './access-store.js'
 
@@ -26,7 +26,7 @@ export interface SourceState {
 
 function eventTopic(auto: AutomationEntry): string | null {
   if (auto.status !== 'active') return null
-  if (auto.type !== 'event_trigger') return null
+  if (auto.type !== 'event_trigger' || !isNotificationEvent(auto.params) || auto.params.mode !== 'notify_only') return null
   const params = auto.params as unknown as EventTriggerAutomationParams
   if (!isAutomationStillValid(params.validUntil)) return null
   return params.trigger?.topic || null

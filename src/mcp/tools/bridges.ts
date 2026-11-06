@@ -1,10 +1,11 @@
 /**
- * ./AGNT Protocol — Bridge Tools
- * Relay (fast bridge), deBridge (cross-chain interoperability).
+ * ./AGENT Protocol — Bridge Tools
+ * Relay and Jumper/LI.FI cross-chain routes.
  * All bridge actions execute real on-chain transactions.
  */
 
 import type { ToolModule } from './index.js'
+import { assertSupportedRoute } from './integration-policy.js'
 import { getOrCreateWallet, getAccount } from '../wallet.js'
 import { getWalletClient as getChainsWalletClient, getPublicClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
 import { decodeFunctionData, encodeFunctionData, formatUnits } from 'viem'
@@ -23,7 +24,6 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<unknown> {
 }
 
 function normalizeRelayCurrency(chain: string, currency: string | undefined, fallback: string): string {
-  if (chain === 'hyperliquid') return HYPERLIQUID_RELAY_PERPS_USDC
   return resolveTokenAddress(chain, currency || fallback)
 }
 
@@ -32,11 +32,8 @@ function normalizeRelayCurrency(chain: string, currency: string | undefined, fal
 const CHAIN_IDS: Record<string, number> = {
   ethereum: 1, arbitrum: 42161, base: 8453, optimism: 10,
   polygon: 137, avalanche: 43114, bsc: 56, linea: 59144, zksync: 324,
-  hyperliquid: 1337, hyperevm: 999,
 }
 
-const HYPERLIQUID_PERPS_USDC = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
-const HYPERLIQUID_RELAY_PERPS_USDC = '0x00000000000000000000000000000000'
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 // Minimal ERC-20 ABI for approvals
@@ -116,15 +113,15 @@ function approvalSummary(chain: string, hashes: `0x${string}`[]): string {
 const TOOLS = [
   {
     name: 'jumper',
-    description: 'Cross-chain swaps via Jumper/LI.FI aggregator, including funding Hyperliquid USDC (Perps)',
+    description: 'Cross-chain swaps via Jumper/LI.FI aggregator',
     inputSchema: {
       type: 'object' as const,
       properties: {
         action: { type: 'string', enum: ['swap', 'quote', 'routes'], description: 'Action to perform' },
         fromChain: { type: 'string', description: 'Source chain' },
-        toChain: { type: 'string', description: 'Destination chain. Use hyperliquid for Hyperliquid USDC (Perps).' },
+        toChain: { type: 'string', description: 'Destination chain.' },
         tokenIn: { type: 'string', description: 'Input token address' },
-        tokenOut: { type: 'string', description: 'Output token address. For Hyperliquid USDC (Perps), this defaults to the LI.FI Hyperliquid USDC token.' },
+        tokenOut: { type: 'string', description: 'Output token address.' },
         amount: { type: 'string', description: 'Human-readable amount, or all/max. For native ETH all/max, gas is reserved automatically.' },
         nativeReserveEth: { type: 'string', description: 'ETH to keep for gas when amount is all/max for the native token. Default: 0.0005 ETH.' },
         slippage: { type: 'number', description: 'Slippage %. Default: 1' },
@@ -154,36 +151,22 @@ const TOOLS = [
       required: ['action', 'fromChain', 'toChain', 'token', 'amount'],
     },
   },
-  {
-    name: 'debridge',
-    description: 'deBridge decentralized cross-chain protocol',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        action: { type: 'string', enum: ['bridge', 'quote', 'status'], description: 'Action to perform' },
-        fromChain: { type: 'string', description: 'Source chain (for bridge/quote)' },
-        toChain: { type: 'string', description: 'Destination chain (for bridge/quote)' },
-        tokenIn: { type: 'string', description: 'Input token address (for bridge/quote)' },
-        tokenOut: { type: 'string', description: 'Output token address (for bridge/quote). Defaults to same as input.' },
-        amount: { type: 'string', description: 'Amount in human-readable units, or all/max. For native ETH all/max, gas is reserved automatically.' },
-        nativeReserveEth: { type: 'string', description: 'ETH to keep for gas when amount is all/max for the native token. Default: 0.0005 ETH.' },
-        decimals: { type: 'number', description: 'Token decimals. Default: 6 for stablecoins, 18 for ETH' },
-        orderId: { type: 'string', description: 'Order ID or tx hash (for status)' },
-      },
-      required: ['action'],
-    },
-  },
 ]
 
 // ─── Handlers ────────────────────────────────────────────
 
 async function handle(name: string, args: Record<string, unknown>) {
+  if (name === 'jumper' || name === 'relay') {
+    for (const key of ['fromChain', 'toChain']) {
+      if (!CHAIN_IDS[String(args[key] || '').toLowerCase()]) return err(`Unknown chain. Available: ${Object.keys(CHAIN_IDS).join(', ')}`)
+    }
+  }
   if (name === 'jumper') {
     const w = getOrCreateWallet()
     const fromChain = (args.fromChain as string | undefined || '').toLowerCase()
     const toChain = (args.toChain as string | undefined || '').toLowerCase()
     const tokenIn = args.tokenIn ? resolveTokenAddress(fromChain, args.tokenIn as string, { lifiNative: true }) : undefined
-    const tokenOut = (args.tokenOut as string | undefined) || (toChain === 'hyperliquid' ? HYPERLIQUID_PERPS_USDC : undefined)
+    const tokenOut = args.tokenOut as string | undefined
     const resolvedTokenOut = tokenOut ? resolveTokenAddress(toChain, tokenOut, { lifiNative: true }) : undefined
     const rawAmount = args.amount as string | undefined
     const slippage = ((args.slippage as number | undefined) ?? 1) / 100
@@ -194,9 +177,6 @@ async function handle(name: string, args: Record<string, unknown>) {
 
     if (!fromId || !toId) return err(`Unknown chain. Available: ${Object.keys(CHAIN_IDS).join(', ')}`)
     if (!tokenIn || !resolvedTokenOut || !rawAmount) return err('Missing tokenIn, tokenOut, or amount.')
-    if (fromChain === 'hyperliquid') {
-      return err('Use the Hyperliquid withdraw action for Hyperliquid USDC (Perps) withdrawals. It exits to Arbitrum USDC through Hyperliquid directly.')
-    }
     if (!SUPPORTED_CHAINS[fromChain]) return err(`Execution from ${fromChain} is not wired in this server yet.`)
 
     try {
@@ -241,6 +221,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         transactionRequest?: { to: string; data: string; value?: string }
       }
 
+      assertSupportedRoute(quote)
       const fromDecimals = quote.action?.fromToken?.decimals ?? inputDecimals
       const toDecimals = quote.action?.toToken?.decimals ?? 6
       const inAmount = formatUnits(BigInt(quote.action?.fromAmount || amount), fromDecimals)
@@ -257,7 +238,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         toPriceUsd: quote.action?.toToken?.priceUSD,
         maxLossPercent,
       })
-      const destinationLabel = toChain === 'hyperliquid' ? 'Hyperliquid USDC (Perps)' : `${toChain}`
+      const destinationLabel = toChain
       const preview =
         `Jumper / LI.FI Route\n\n` +
         `You send: ${inAmount} ${quote.action?.fromToken?.symbol || 'token'} on ${fromChain}\n` +
@@ -270,16 +251,13 @@ async function handle(name: string, args: Record<string, unknown>) {
         `Estimated time: ${quote.estimate?.executionDuration || '?'} seconds\n` +
         `Estimated source-chain gas: $${sourceGasUsd.toFixed(2)}\n` +
         `Estimated route fees: $${routeFeesUsd.toFixed(2)}\n\n` +
-        (toChain === 'hyperliquid'
-          ? `Where it lands: Hyperliquid USDC (Perps), not the spot account.\n`
-          : '') +
         `No live route was executed.`
 
       if (routeValue.blocked) {
         return err(
           `${routeValue.reason}\n\n` +
           preview +
-          `\nThis route is too expensive to use. Try a larger amount, a different source token, or the official Hyperliquid Arbitrum USDC deposit fallback.`
+          `\nThis route is too expensive to use. Try a larger amount, a different source token or a different source token.`
         )
       }
 
@@ -289,7 +267,7 @@ async function handle(name: string, args: Record<string, unknown>) {
 
       const safetyNotice =
         (await buildTradeSafetyNotice(fromChain, [tokenIn])) +
-        (toChain === 'hyperliquid' ? '' : await buildTradeSafetyNotice(toChain, [resolvedTokenOut]))
+        (await buildTradeSafetyNotice(toChain, [resolvedTokenOut]))
 
       const wc = getChainsWalletClient(fromChain, w)
       const txTo = quote.transactionRequest.to as `0x${string}`
@@ -331,18 +309,15 @@ async function handle(name: string, args: Record<string, unknown>) {
         safetyNotice +
         preview.replace('No live route was executed.', 'Live route was submitted.') +
         approvalSummary(fromChain, approvalHashes) +
-        `\nSource transaction: ${explorer}\n\n` +
-        (toChain === 'hyperliquid'
-          ? `After it completes, ask me: "Check my Hyperliquid account".\n`
-          : '')
+        `\nSource transaction: ${explorer}\n\n`
       )
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (msg.includes('AMOUNT_TOO_LOW')) {
-        return err('Jumper has no route for this amount. Try a larger amount or use the official Hyperliquid Arbitrum USDC deposit fallback.')
+        return err('Jumper has no route for this amount. Try a larger amount or a different source token.')
       }
       if (msg.includes('No available quotes') || msg.includes('None of the available routes')) {
-        return err('Jumper has no executable route for this source chain, token, and amount right now. Try another source chain, a larger amount, or use the official Hyperliquid Arbitrum USDC deposit fallback.')
+        return err('Jumper has no executable route for this source chain, token, and amount right now. Try another source chain, a larger amount, or a different source token.')
       }
       return err(`Jumper route failed: ${msg}`)
     }
@@ -377,7 +352,7 @@ async function handle(name: string, args: Record<string, unknown>) {
         try {
           const safetyNotice =
             (await buildTradeSafetyNotice(fromChain, [token])) +
-            (toChain === 'hyperliquid' ? '' : await buildTradeSafetyNotice(toChain, [toToken]))
+            (await buildTradeSafetyNotice(toChain, [toToken]))
 
           // Step 1: Get executable quote from Relay API
           const quoteData = await fetchJson('https://api.relay.link/quote', {
@@ -399,6 +374,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             details?: { currencyIn?: { amountFormatted: string; amountUsd?: string; currency: { symbol: string } }; currencyOut?: { amountFormatted: string; amountUsd?: string; currency: { symbol: string } }; timeEstimate: number }
           }
 
+          assertSupportedRoute(quoteData)
           if (!quoteData.steps?.length || !quoteData.steps[0]?.items?.length) {
             return err('Relay returned no executable steps. Route may not be available.')
           }
@@ -533,6 +509,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             }
           }
 
+          assertSupportedRoute(quoteData)
           const details = quoteData.details
           if (!details) return err('No quote available for this route.')
           const routeValue = assessRouteUsdValues({
@@ -566,190 +543,6 @@ async function handle(name: string, args: Record<string, unknown>) {
         }
       }
       default: return err(`Unknown relay action: ${args.action}`)
-    }
-  }
-
-  if (name === 'debridge') {
-    switch (args.action) {
-      case 'bridge': {
-        if (!args.fromChain || !args.toChain || !args.tokenIn || !args.amount) return err('Missing required parameters for bridge')
-        const w = getOrCreateWallet()
-        const fromChain = (args.fromChain as string).toLowerCase()
-        const toChain = (args.toChain as string).toLowerCase()
-        const tokenIn = args.tokenIn as string
-        const tokenOut = (args.tokenOut as string) || tokenIn
-        const rawAmount = args.amount as string
-        const decimals = (args.decimals as number) || 6
-        const amount = (await resolveRouteAmount({
-          amount: rawAmount,
-          decimals,
-          token: tokenIn,
-          account: w.address as `0x${string}`,
-          client: getPublicClient(fromChain),
-          nativeReserve: args.nativeReserveEth,
-        })).toString()
-
-        const fromId = CHAIN_IDS[fromChain]
-        const toId = CHAIN_IDS[toChain]
-        if (!fromId || !toId) return err(`Unknown chain. Available: ${Object.keys(CHAIN_IDS).join(', ')}`)
-
-        try {
-          const safetyNotice =
-            (await buildTradeSafetyNotice(fromChain, [tokenIn])) +
-            (await buildTradeSafetyNotice(toChain, [tokenOut]))
-
-          // Step 1: Get executable transaction from deBridge create-tx API
-          const txUrl = `https://deswap.debridge.finance/v1.0/dln/order/create-tx?` +
-            `srcChainId=${fromId}&dstChainId=${toId}` +
-            `&srcChainTokenIn=${tokenIn}&dstChainTokenOut=${tokenOut}` +
-            `&srcChainTokenInAmount=${amount}` +
-            `&dstChainTokenOutRecipient=${w.address}` +
-            `&senderAddress=${w.address}` +
-            `&prependOperatingExpenses=true`
-
-          const txData = await fetchJson(txUrl) as {
-            tx?: { to: string; data: string; value: string }
-            estimation?: { dstChainTokenOut?: { amount: string; name: string; decimals: number }; srcChainTokenIn?: { amount: string; name: string }; recommendedSlippage: number }
-            orderId?: string
-            order?: { approximateFulfillmentDelay: number }
-          }
-
-          if (!txData.tx) return err('deBridge returned no executable transaction. Route may not be available, try action: quote first.')
-
-          // Step 2: Check if ERC-20 approval is needed (non-native tokens)
-          const isNativeToken = tokenIn.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-                                tokenIn.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-          let approvalHashes: `0x${string}`[] = []
-
-          if (!isNativeToken) {
-            const pub = getPublicClient(fromChain)
-            const spender = txData.tx.to as `0x${string}`
-            const wc = getChainsWalletClient(fromChain, w)
-            approvalHashes = await approveExactIfNeeded({
-              chain: fromChain,
-              token: tokenIn as `0x${string}`,
-              owner: w.address as `0x${string}`,
-              spender,
-              amount: BigInt(amount),
-              pub,
-              wc,
-              wallet: getAccount(w),
-            })
-          }
-
-          // Step 3: Submit the bridge transaction
-          const wc = getChainsWalletClient(fromChain, w)
-          await assertNativeBalanceCoversTx({
-            client: getPublicClient(fromChain),
-            account: w.address,
-            to: txData.tx.to as `0x${string}`,
-            data: txData.tx.data as `0x${string}`,
-            value: BigInt(txData.tx.value || '0'),
-            chain: fromChain,
-          })
-          const hash = await wc.sendTransaction({
-            account: getAccount(w),
-            chain: SUPPORTED_CHAINS[fromChain].chain,
-            to: txData.tx.to as `0x${string}`,
-            data: txData.tx.data as `0x${string}`,
-            value: BigInt(txData.tx.value || '0'),
-          })
-
-          const explorer = explorerTxUrl(fromChain, hash)
-          const outAmount = txData.estimation?.dstChainTokenOut?.amount || '?'
-          const outName = txData.estimation?.dstChainTokenOut?.name || tokenOut
-          const outDecimals = txData.estimation?.dstChainTokenOut?.decimals || 18
-          const formattedOut = outAmount !== '?' ? formatUnits(BigInt(outAmount), outDecimals) : '?'
-          const delay = txData.order?.approximateFulfillmentDelay || 30
-
-          return text(
-            safetyNotice +
-            `✅ deBridge Bridge Executed!\n\n` +
-            `From: ${tokenIn} on ${fromChain}\n` +
-            `To: ~${formattedOut} ${outName} on ${toChain}\n` +
-            `Est. Time: ~${delay}s\n\n` +
-            `Wallet: ${w.name} (${w.address})\n` +
-            approvalSummary(fromChain, approvalHashes) +
-            `Tx: ${explorer}\n` +
-            `Order: ${txData.orderId || hash}\n\n` +
-            `💡 Use action 'status' with orderId to track fulfillment.`
-          )
-        } catch (e) {
-          return err(`deBridge bridge failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      case 'quote': {
-        if (!args.fromChain || !args.toChain || !args.tokenIn || !args.amount) return err('Missing required parameters for quote')
-        const fromChain = (args.fromChain as string).toLowerCase()
-        const toChain = (args.toChain as string).toLowerCase()
-        const tokenIn = args.tokenIn as string
-        const tokenOut = (args.tokenOut as string) || tokenIn
-        const rawAmount = args.amount as string
-        const decimals = (args.decimals as number) || 6
-        const quoteWallet = getOrCreateWallet()
-        const amount = (await resolveRouteAmount({
-          amount: rawAmount,
-          decimals,
-          token: tokenIn,
-          account: quoteWallet.address as `0x${string}`,
-          client: getPublicClient(fromChain),
-          nativeReserve: args.nativeReserveEth,
-        })).toString()
-
-        const fromId = CHAIN_IDS[fromChain]
-        const toId = CHAIN_IDS[toChain]
-        if (!fromId || !toId) return err(`Unknown chain.`)
-
-        try {
-          const url = `https://deswap.debridge.finance/v1.0/dln/order/quote?srcChainId=${fromId}&dstChainId=${toId}&srcChainTokenIn=${tokenIn}&dstChainTokenOut=${tokenOut}&srcChainTokenInAmount=${amount}&prependOperatingExpenses=true`
-          const data = await fetchJson(url) as {
-            estimation?: { dstChainTokenOut?: { amount: string; name: string; decimals: number }; recommendedSlippage: number }
-            order?: { approximateFulfillmentDelay: number }
-          }
-
-          if (!data.estimation) return err('No quote available for this route.')
-
-          const outAmount = data.estimation.dstChainTokenOut?.amount || '?'
-          const outName = data.estimation.dstChainTokenOut?.name || tokenOut
-          const outDecimals = data.estimation.dstChainTokenOut?.decimals || 18
-          const formattedOut = outAmount !== '?' ? formatUnits(BigInt(outAmount), outDecimals) : '?'
-          const delay = data.order?.approximateFulfillmentDelay || 30
-
-          return text(
-            `📊 deBridge Quote\n\n` +
-            `Route: ${fromChain} → ${toChain}\n` +
-            `Input: ${amount} (${tokenIn})\n` +
-            `Output: ~${formattedOut} ${outName}\n` +
-            `Estimated Time: ~${delay}s\n` +
-            `Recommended Slippage: ${data.estimation.recommendedSlippage}%\n\n` +
-            `💡 Use action 'bridge' to execute this route.\n` +
-            `💡 Use action 'status' to track after executing.`
-          )
-        } catch (e) {
-          return err(`deBridge quote failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      case 'status': {
-        if (!args.orderId) return err('Missing orderId')
-        const orderId = args.orderId as string
-
-        try {
-          const data = await fetchJson(`https://deswap.debridge.finance/v1.0/dln/order/${orderId}/status`) as {
-            status?: string
-            orderData?: { give?: { amount: string }; take?: { amount: string } }
-          }
-
-          return text(
-            `📊 deBridge Order Status\n\n` +
-            `Order: ${orderId}\n` +
-            `Status: ${data.status || 'Unknown'}\n\n` +
-            `${data.status === 'Fulfilled' ? '✅ Bridge complete!' : data.status === 'Created' ? '⏳ Waiting for fulfillment...' : `Current state: ${data.status}`}`
-          )
-        } catch (e) {
-          return err(`Status check failed: ${e instanceof Error ? e.message : String(e)}`)
-        }
-      }
-      default: return err(`Unknown debridge action: ${args.action}`)
     }
   }
 

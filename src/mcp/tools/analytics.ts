@@ -1,9 +1,10 @@
 /**
- * ./AGNT Protocol — Analytics & Intelligence Tools
- * Portfolio tracking, PnL, whale activity, sentiment, and token security.
+ * ./AGENT Protocol — Analytics & Intelligence Tools
+ * Portfolio overview, whale activity, sentiment, and token security.
  */
 
 import type { ToolModule } from './index.js'
+import { hasRemovedIntegration, isRemovedIntegration } from './integration-policy.js'
 import { getActiveWallet } from '../wallet.js'
 import { getPublicClient } from '../chains.js'
 import { assessTokenTradeSafety, formatTradeSafetyNotice } from './trade-safety.js'
@@ -20,12 +21,11 @@ async function fetchJson(url: string): Promise<unknown> {
 const TOOLS = [
   {
     name: 'analytics',
-    description: 'Analytics & Intelligence Tools for portfolio, PnL, whale activity, sentiment, security, and ENS.',
+    description: 'Analytics & Intelligence Tools for portfolio, whale activity, sentiment, security, and ENS.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        action: { type: 'string', enum: ['portfolio', 'pnl', 'whale_activity', 'token_security', 'sentiment', 'resolve_ens'], description: 'Action to perform' },
-        period: { type: 'string', enum: ['24h', '7d', '30d', 'all'], description: 'Time period. Default: 7d (for pnl)' },
+        action: { type: 'string', enum: ['portfolio', 'whale_activity', 'token_security', 'sentiment', 'resolve_ens'], description: 'Action to perform' },
         token: { type: 'string', description: 'Token symbol or address (for whale_activity, token_security)' },
         minUsd: { type: 'number', description: 'Minimum transaction size in USD. Default: 100000 (for whale_activity)' },
         chain: { type: 'string', description: 'Chain to check on. Default: ethereum (for token_security)' },
@@ -38,72 +38,17 @@ const TOOLS = [
 
 async function handle(name: string, args: Record<string, unknown>) {
   if (name === 'analytics') {
+    if ([args.token, args.chain, ...String(args.tokens || '').split(',')].some(isRemovedIntegration)) return err('This integration is not supported.')
     switch (args.action) {
       case 'portfolio': {
         const w = getActiveWallet()
         if (!w) return text('No wallet. Create one first.')
 
-        // Aggregate from Hyperliquid positions if available
         const lines: string[] = ['📊 Portfolio Summary\n']
         lines.push(`Wallet: ${w.name} (${w.address})\n`)
 
-        // Check HL account
-        try {
-          const hlRes = await fetch('https://api.hyperliquid.xyz/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'clearinghouseState', user: w.address }),
-          })
-          const hlData = await hlRes.json() as { marginSummary: { accountValue: string } }
-          const hlValue = parseFloat(hlData.marginSummary.accountValue)
-          if (hlValue > 0) {
-            lines.push(`  Hyperliquid:  $${hlValue.toFixed(2)}`)
-          }
-        } catch { /* HL not connected */ }
-
-        lines.push(`\n💡 For on-chain balances per chain, use wallet_info or get_balance.`)
-        lines.push(`💡 For Aave positions, use aave_positions.`)
-        return text(lines.join('\n'))
-      }
-
-      case 'pnl': {
-        const w = getActiveWallet()
-        if (!w) return text('No wallet. Create one first.')
-        const period = (args.period as string) || '7d'
-
-        // Pull from HL if available
-        const lines: string[] = [`📊 PnL Report (${period})\n`]
-        lines.push(`Wallet: ${w.name}\n`)
-
-        try {
-          const hlRes = await fetch('https://api.hyperliquid.xyz/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'clearinghouseState', user: w.address }),
-          })
-          const hlData = await hlRes.json() as {
-            marginSummary: { accountValue: string }
-            assetPositions: { position: { coin: string; unrealizedPnl: string; szi: string } }[]
-          }
-
-          const positions = hlData.assetPositions.filter((p) => parseFloat(p.position.szi) !== 0)
-          if (positions.length) {
-            let totalUpnl = 0
-            lines.push('Hyperliquid Positions:')
-            for (const { position: p } of positions) {
-              const upnl = parseFloat(p.unrealizedPnl)
-              totalUpnl += upnl
-              lines.push(`  ${p.coin.padEnd(8)} uPnL: ${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`)
-            }
-            lines.push(`\n  Total Unrealized: ${totalUpnl >= 0 ? '+' : ''}$${totalUpnl.toFixed(2)}`)
-          } else {
-            lines.push('  No open Hyperliquid positions.')
-          }
-        } catch {
-          lines.push('  Hyperliquid: Not connected or no positions.')
-        }
-
-        lines.push(`\n💡 On-chain PnL tracking requires indexing transaction history.`)
+        lines.push(`\n💡 For on-chain balances per chain, use wallet action=balance.`)
+        lines.push(`💡 For Aave positions, use aave action=positions.`)
         return text(lines.join('\n'))
       }
 
@@ -117,7 +62,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           lines.push(`Min Transaction: $${minUsd.toLocaleString()}\n`)
 
           // For now, provide market context that indicates whale activity
-          const CG_MAP: Record<string, string> = { btc: 'bitcoin', eth: 'ethereum', sol: 'solana', hype: 'hyperliquid', doge: 'dogecoin', arb: 'arbitrum', op: 'optimism' }
+          const CG_MAP: Record<string, string> = { btc: 'bitcoin', eth: 'ethereum', doge: 'dogecoin', arb: 'arbitrum', op: 'optimism' }
           const id = CG_MAP[token] || token
           const data = await fetchJson(`https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false`) as {
             market_data: { total_volume: { usd: number }; price_change_percentage_24h: number; market_cap: { usd: number } }
@@ -153,7 +98,8 @@ async function handle(name: string, args: Record<string, unknown>) {
         // Use GoPlus Security API (free, no key needed)
         try {
           const chainIds: Record<string, string> = { ethereum: '1', arbitrum: '42161', base: '8453', optimism: '10', polygon: '137', avalanche: '43114', bsc: '56' }
-          const chainId = chainIds[chain] || '1'
+          const chainId = chainIds[chain]
+          if (!chainId) return err('Unsupported chain.')
           const data = await fetchJson(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${token}`) as {
             result: Record<string, {
               is_honeypot?: string; is_open_source?: string; is_proxy?: string;
@@ -173,6 +119,7 @@ async function handle(name: string, args: Record<string, unknown>) {
             return text(lines.join('\n'))
           }
 
+          if (hasRemovedIntegration(info)) return err('This token integration is not supported.')
           lines.push(`Name: ${info.token_name || 'Unknown'} (${info.token_symbol || '?'})`)
           lines.push(`\nSecurity Checks:`)
           lines.push(`  Honeypot: ${info.is_honeypot === '1' ? '🔴 YES — DANGER' : '🟢 No'}`)
@@ -227,7 +174,7 @@ async function handle(name: string, args: Record<string, unknown>) {
 
           // Trending coins
           lines.push('🔥 Trending on CoinGecko:')
-          for (const { item } of trending.coins.slice(0, 8)) {
+          for (const { item } of trending.coins.filter(coin => !hasRemovedIntegration(coin)).slice(0, 8)) {
             const change = item.data?.price_change_percentage_24h?.usd
             const changeStr = change !== undefined ? ` (${change >= 0 ? '+' : ''}${change.toFixed(1)}%)` : ''
             lines.push(`  ${item.symbol.toUpperCase().padEnd(8)} ${item.name}${changeStr} — #${item.market_cap_rank || '?'}`)

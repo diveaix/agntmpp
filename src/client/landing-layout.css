@@ -1,0 +1,70 @@
+.landing-page {
+  --page-gutter: 48px;
+  --section-space: 72px;
+  --section-heading-gap: 40px;
+  --section-grid-gap: 24px;
+}
+
+.landing-page .site-section {
+  width: min(1200px, calc(100% - var(--page-gutter) * 2));
+  max-width: none;
+  margin: 0 auto;
+  padding: var(--section-space) 0;
+  scroll-margin-top: 88px;
+}
+
+.landing-page .section-divider { display: flex; align-items: center; justify-content: center; gap: 22px; width: min(600px, calc(100% - var(--page-gutter) * 2)); height: 36px; margin: 0 auto; pointer-events: none; }
+.section-divider > svg { width: 40px; height: 32px; flex-shrink: 0; }
+.section-divider-field { width: 190px; height: 25px; background: radial-gradient(circle, #747470 1px, transparent 1.2px) 50% 50% / 9px 9px; opacity: .22; mask-image: linear-gradient(90deg, transparent, #000); }
+.section-divider-field:last-child { transform: scaleX(-1); }
+
+.landing-page .section-heading {
+  margin: 0 0 var(--section-heading-gap);
+  text-align: left;
+}
+
+.landing-page .section-title {
+  max-width: 850px;
+  margin: 0;
+  color: #e8e8e8;
+  font: 400 clamp(36px, 4vw, 52px)/1.12 var(--font-accent);
+  font-synthesis: none;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.landing-page .section-title > span { color: #8a8a8a; }
+
+.landing-page .section-description {
+  max-width: 640px;
+  margin: 20px 0 0;
+  color: #a6a6a6;
+  font: 400 16px/1.7 var(--font-sans);
+  text-wrap: pretty;
+}
+
+.landing-page .landing-details { width: auto; margin: 0; padding: 0; }
+.landing-page .capabilities-grid,
+.landing-page .wallet-grid { gap: var(--section-grid-gap); }
+
+.landing-page .compat-grid { gap: 12px; }
+.landing-page .compat-card { border-color: #292929; background: #080808; }
+.landing-page .compat-num { color: #777; }
+.landing-page .compat-name { font-size: 12px; letter-spacing: 0; }
+.landing-page + footer { padding-top: 72px; border-top: 0; }
+
+@media (max-width: 1000px) {
+  .landing-page { --page-gutter: 32px; --section-space: 60px; --section-grid-gap: 20px; }
+  .landing-page .compat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .landing-page { --page-gutter: 20px; --section-space: 48px; --section-heading-gap: 28px; --section-grid-gap: 16px; }
+  .landing-page .section-divider { gap: 16px; height: 28px; }
+  .section-divider-field { width: 90px; height: 19px; background-size: 7px 7px; }
+  .section-divider > svg { width: 32px; height: 26px; }
+  .landing-page .section-title { font-size: clamp(30px, 8.5vw, 40px); }
+  .landing-page .section-description { margin-top: 16px; font-size: 15px; }
+  .landing-page .compat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landing-page + footer { padding: 48px 20px 36px; }
+}

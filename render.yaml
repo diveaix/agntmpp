@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: agnt-frontend
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist/client
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+    routes:
+      - type: redirect
+        source: /dashboard/*
+        destination: /toolkit
+      - type: redirect
+        source: /checkout
+        destination: /toolkit
+      - type: rewrite
+        source: /*
+        destination: /index.html

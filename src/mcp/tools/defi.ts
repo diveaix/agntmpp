@@ -1,9 +1,10 @@
 /**
- * ./AGNT Protocol — DeFi Lending & Yield Tools
+ * ./AGENT Protocol — DeFi Lending & Yield Tools
  * Aave V3 supply/withdraw/positions, yield scanning, and ETH staking.
  */
 
 import type { ToolModule } from './index.js'
+import { hasRemovedIntegration, isRemovedIntegration } from './integration-policy.js'
 import { getActiveWallet, getOrCreateWallet } from '../wallet.js'
 import { getPublicClient } from '../chains.js'
 import { formatUnits, parseUnits } from 'viem'
@@ -188,6 +189,7 @@ async function handle(name: string, args: Record<string, unknown>) {
   }
 
   if (name === 'yield') {
+    if ([args.chain, args.protocol, args.token].some(isRemovedIntegration)) return err('This integration is not supported.')
     switch (args.action) {
       case 'scan': {
         const tokenFilter = args.token as string | undefined
@@ -197,7 +199,7 @@ async function handle(name: string, args: Record<string, unknown>) {
           // Use DeFiLlama yield API
           const data = await fetchJson('https://yields.llama.fi/pools') as { data: { pool: string; chain: string; project: string; symbol: string; tvlUsd: number; apy: number; apyBase: number }[] }
 
-          let pools = data.data
+          let pools = data.data.filter(pool => !hasRemovedIntegration(pool))
             .filter((p) => p.tvlUsd > 1_000_000) // Only pools with >$1M TVL
             .filter((p) => p.apy > minApy)
             .filter((p) => ['aave-v3', 'compound-v3', 'lido', 'spark', 'morpho-aavev3'].includes(p.project))

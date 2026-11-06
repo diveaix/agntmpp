@@ -1,14 +1,15 @@
 /**
- * ./AGNT Protocol — Automation Scheduler
- * Lightweight in-process scheduler for DCA, price alerts, and recurring strategies.
+ * ./AGENT Protocol — Automation Scheduler
+ * Persists price alerts and event notifications, with legacy history retained.
  * Persists automations to encrypted JSON file (same pattern as wallets).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { dirname, resolve, isAbsolute } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { resolve, isAbsolute } from 'path'
 import { encrypt, decrypt, getPassphrase } from './crypto.js'
 import { randomBytes } from 'crypto'
-import type { AutomationPlan } from './automation-types.js'
+import { isNotificationEvent, type AutomationPlan } from './automation-types.js'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -48,21 +49,26 @@ export function loadAutomations(custom?: string): AutomationStore {
   if (!existsSync(fp)) return { automations: [] }
   try {
     const raw = readFileSync(fp, 'utf-8')
-    if (raw.trim().startsWith('{')) return JSON.parse(raw) as AutomationStore
-    const json = decrypt(raw, getPassphrase())
-    return JSON.parse(json) as AutomationStore
-  } catch {
+    const json = raw.trim().startsWith('{') ? raw : decrypt(raw, getPassphrase())
+    const store = JSON.parse(json) as AutomationStore
+    for (const auto of store.automations) {
+      if (auto.status === 'active' && !isSupportedAutomation(auto)) {
+        auto.status = 'paused'
+        auto.nextRun = null
+      }
+    }
+    return store
+  } catch (error) {
+    handleStoreReadFailure(`Scheduler store (${fp})`, error)
     return { automations: [] }
   }
 }
 
 function saveAutomations(store: AutomationStore, custom?: string) {
   const fp = resolvePath(custom)
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const json = JSON.stringify(store, null, 2)
   const encrypted = encrypt(json, getPassphrase())
-  writeFileSync(fp, encrypted, 'utf-8')
+  writePrivateFileAtomicSync(fp, encrypted)
 }
 
 // ─── CRUD Operations ─────────────────────────────────────
@@ -71,10 +77,15 @@ function generateId(): string {
   return randomBytes(4).toString('hex')
 }
 
+export function isSupportedAutomation(auto: Pick<AutomationEntry, 'type' | 'params'>): boolean {
+  return auto.type === 'price_alert' || (auto.type === 'event_trigger' && isNotificationEvent(auto.params))
+}
+
 export function createAutomation(
   entry: Omit<AutomationEntry, 'id' | 'createdAt' | 'lastRun' | 'nextRun' | 'runCount' | 'history'>,
   custom?: string,
 ): AutomationEntry {
+  if (!isSupportedAutomation(entry)) throw new Error('This automation is no longer supported. Create a price alert or event notification instead.')
   const store = loadAutomations(custom)
   const automation: AutomationEntry = {
     ...entry,
@@ -105,6 +116,13 @@ export function updateAutomationStatusForUser(id: string, userId: string, status
   const store = loadAutomations()
   const auto = store.automations.find((a) => a.id === id && a.userId === userId)
   if (!auto) return null
+  if (status === 'active' && !isSupportedAutomation(auto)) {
+    auto.status = 'paused'
+    auto.nextRun = null
+    auto.history.push({ time: new Date().toISOString(), result: 'Cannot resume: this automation integration is no longer supported.', success: false })
+    saveAutomations(store)
+    return auto
+  }
   auto.status = status
   if (status === 'active') {
     if (auto.maxRuns > 0 && auto.runCount >= auto.maxRuns) {

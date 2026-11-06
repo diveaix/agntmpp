@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Skill Manager Tool
+ * ./AGENT Protocol — Skill Manager Tool
  *
  * Install, list, remove, and reload skills at runtime.
  * Skills are .ts plugins dropped in src/mcp/skills/ or installed from URLs.

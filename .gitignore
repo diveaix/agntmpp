@@ -1,9 +1,15 @@
 node_modules/
+.npm-cache*/
 dist/
+test-results/
 .env
 .agnt/
 *.enc
 *.log
 .DS_Store
 docs/
+!src/client/docs/
+!src/client/docs/**
 skills/
+.vercel
+wallet-recovery-output/

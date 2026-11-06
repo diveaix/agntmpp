@@ -1,0 +1,93 @@
+.asim-section { position: relative; color: #dedede; background: var(--black); }
+.asim-demo { width: 100%; }
+.asim-frame { position: relative; display: flex; flex-direction: column; height: 730px; margin: 0; overflow: hidden; border: 1px solid #707070; border-radius: 13px; background: var(--black); box-shadow: 0 0 0 1px #ffffff07, 0 1px 0 #ffffff2b inset, 0 18px 65px -24px #000; color-scheme: dark; font-family: 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace; }
+.asim-toolbar { position: relative; flex: 0 0 43px; display: grid; grid-template-columns: 85px 1fr 85px; align-items: center; padding: 0 17px; background: linear-gradient(#292929, #1a1a1a); border-bottom: 1px solid #ffffff05; box-shadow: 0 1px 0 #ffffff0c inset; user-select: none; }
+.asim-window-dots { display: flex; align-items: center; gap: 7px; }
+.asim-window-dots i { display: block; width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 1px #00000014; }
+.asim-window-dots i:nth-child(2) { background: #febc2e; }
+.asim-window-dots i:nth-child(3) { background: #28c840; }
+.asim-window-title { display: flex; justify-content: center; align-items: center; gap: 8px; color: #c6c6c6; font: 500 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.asim-window-title svg { color: #a1a1a1; }
+.asim-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; overflow: hidden; border: 1px solid #323232; border-radius: 9px; background: linear-gradient(#1e1e1e, #171717); font-family: 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace; }
+.asim-tabs button { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 41px; padding: 0 18px; border: 0; border-right: 1px solid #353535; border-radius: 0; background: transparent; color: #8d8d8d; font-size: 10px; line-height: 1.5; font-family: inherit; cursor: pointer; transition: color .18s, background .18s; }
+.asim-tabs button:last-child { border-right: 0; }
+.asim-tabs button[aria-selected='true'] { background: linear-gradient(#2a2a2a, #232323); color: #e3e3e3; box-shadow: inset 0 1px #ffffff0a; }
+.asim-tabs button:hover { color: #e3e3e3; background: #242424; }
+.asim-tab-symbol { color: #757575; font-size: 17px; line-height: 1; }
+.asim-tab-number { margin-left: auto; color: #696969; font-size: 9px; }
+.asim-tabs button[aria-selected='true'] .asim-tab-symbol { color: #c7c7c7; }
+.asim-panel { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.asim-session-path { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 37px; flex-shrink: 0; padding: 0 30px; border-bottom: 1px solid #ffffff07; color: #727272; font-size: 9px; }
+.asim-session-path strong { color: #999; font-weight: 400; }
+.asim-output { flex: 1; min-height: 0; padding: 29px 32px 30px; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: auto; scrollbar-width: thin; scrollbar-color: #494949 transparent; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; tab-size: 2; }
+.asim-message { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; margin-bottom: 25px; max-width: 960px; }
+.asim-message-mark { padding-top: 1px; color: #d1d1d1; font-size: 15px; font-weight: 600; }
+.asim-speaker { display: block; margin-bottom: 5px; font-size: 10px; line-height: 1.6; color: #878787; }
+.asim-message p { margin: 0; min-height: 24px; font: inherit; line-height: 1.85; color: #c4c4c4; }
+.asim-message-you p { color: #ededeb; }
+.asim-message-agent .asim-speaker { color: #bdbdb6; }
+.asim-message-agent .asim-message-mark { color: #ecece3; }
+.asim-caret { display: inline-block; height: 14px; width: 6px; margin-left: 4px; background: #c1c1b9; vertical-align: -2px; animation: asim-caret 1.15s step-end infinite; }
+.asim-activity { margin: 1px 0 25px 34px; padding-left: 15px; border-left: 1px solid #353535; color: #949494; font-size: 11px; line-height: 1.9; }
+.asim-activity-label { display: block; margin-bottom: 8px; font-size: 9px; color: #777; letter-spacing: .04em; }
+.asim-activity-label > span { padding: 0 6px; color: #494949; }
+.asim-activity > div { display: flex; align-items: baseline; gap: 10px; margin-top: 3px; }
+.asim-activity > div > span:first-child { flex: 0 0 12px; text-align: center; color: #9b9b93; }
+.asim-activity .is-working { color: #d6d6ce; }
+.asim-review { max-width: 900px; margin: 2px 0 27px 34px; padding: 18px 22px; border: 1px solid #303030; border-left-color: #71716a; background: #101010; }
+.asim-review-title { display: block; margin-bottom: 13px; font-size: 11px; color: #d0d0c8; }
+.asim-review dl { display: grid; gap: 5px; margin: 0; font-size: 11px; }
+.asim-review dl > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 18px; }
+.asim-review dt { color: #858585; }
+.asim-review dd { margin: 0; color: #c6c6be; }
+.asim-review > p { margin: 15px 0 0; padding-top: 12px; border-top: 1px solid #292929; max-width: 760px; font-size: 10px; line-height: 1.8; color: #898989; }
+.asim-signer { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin: 0 0 21px 34px; color: #b1b1a7; font-size: 11px; }
+.asim-signer > span:first-child { flex: 0 0 12px; }
+.asim-signer .asim-signer-hint { border: 1px solid #373733; padding: 1px 6px; border-radius: 3px; color: #85857c; font-size: 8px; }
+.asim-signer.is-signed { color: #bcbcb2; }
+.asim-receipt { display: flex; align-items: baseline; gap: 11px; margin: -4px 0 25px 34px; padding: 12px 0; border-top: 1px solid #353535; color: #acaca4; font-size: 10px; }
+.asim-receipt > span { color: #d0d0c5; }
+.asim-next-line { display: flex; align-items: baseline; gap: 12px; padding-top: 7px; color: #777; font-size: 11px; }
+.asim-next-line > span:first-child { color: #bbb; font-size: 14px; }
+.asim-next-line .asim-caret { height: 12px; width: 5px; margin-left: 0; }
+.asim-follow { position: absolute; right: 19px; bottom: 14px; display: flex; align-items: center; gap: 10px; min-height: 33px; padding: 0 12px; border: 1px solid #4b4b4b; border-radius: 5px; background: #252525; color: #cecece; font: 10px var(--mono); cursor: pointer; box-shadow: 0 3px 14px #0005; }
+.asim-section button:focus-visible, .asim-output:focus-visible { outline: 2px solid #dadada; outline-offset: -3px; }
+.asim-frame[data-playing='false'] .asim-caret { animation-play-state: paused; }
+.asim-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@keyframes asim-caret { 50% { opacity: 0; } }
+@media (max-width: 760px) {
+  .asim-output { padding-inline: 24px; }
+  .asim-session-path { padding-inline: 24px; }
+}
+@media (max-width: 640px) {
+  .asim-frame { height: 650px; border-radius: 10px; }
+  .asim-toolbar { grid-template-columns: 62px 1fr 62px; padding-inline: 13px; }
+  .asim-window-title { font-size: 11px; gap: 6px; }
+  .asim-window-dots { gap: 5px; }
+  .asim-window-dots i { width: 10px; height: 10px; }
+  .asim-tabs button { min-height: 43px; padding: 0 10px; gap: 6px; font-size: 10px; }
+  .asim-tab-number { display: none; }
+  .asim-tab-symbol { font-size: 15px; }
+  .asim-session-path { min-height: 36px; padding-inline: 15px; font-size: 8px; }
+  .asim-output { padding: 22px 16px; font-size: 12px; }
+  .asim-message { grid-template-columns: 17px minmax(0, 1fr); gap: 9px; margin-bottom: 23px; }
+  .asim-message-mark { font-size: 13px; }
+  .asim-speaker { font-size: 9px; }
+  .asim-activity { margin-left: 26px; padding-left: 11px; font-size: 10px; }
+  .asim-review { margin-left: 26px; padding: 14px; }
+  .asim-review dl > div { grid-template-columns: 1fr; gap: 1px; }
+  .asim-review dl { gap: 9px; font-size: 10px; }
+  .asim-review-title { font-size: 10px; }
+  .asim-review > p { font-size: 9px; }
+  .asim-signer { margin-left: 26px; font-size: 10px; gap: 7px; }
+  .asim-receipt { margin-left: 26px; font-size: 9px; }
+  .asim-next-line { font-size: 10px; gap: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .asim-section *, .asim-section *::before, .asim-section *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 360px) {
+  .asim-tab-symbol { display: none; }
+}
+
+

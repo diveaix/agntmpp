@@ -1,0 +1,87 @@
+.landing-details {
+  color: #efefef;
+}
+
+.landing-details .accordion-wrap { max-width: none; margin: 0; padding: 0; border: 1px solid #252525; border-radius: 16px; overflow: hidden; background: #080808; }
+.landing-details .accord-item { border-bottom: 1px solid #252525; scroll-margin-top: 100px; }
+.landing-details .accord-item:first-child { border-top: 0; }
+.landing-details .accord-item:last-child { border-bottom: 0; }
+.landing-details .accord-header { min-height: 104px; padding: 28px 32px; gap: 28px; transition: background .2s; }
+.landing-details .accord-header:hover { padding-left: 32px; background: #101010; }
+.landing-details .accord-header:focus-visible { outline: 1px solid #ccc; outline-offset: -5px; }
+.landing-details .accord-left { gap: 27px; }
+.landing-details .accord-num { min-width: 28px; color: #888; font: 400 11px/1 var(--mono); letter-spacing: .04em; }
+.landing-details .accord-title { color: #d9d9d9; font: 500 24px/1.3 var(--font-sans); letter-spacing: -.025em; text-transform: none; }
+.landing-details .accord-toggle { width: 34px; height: 34px; border: 1px solid #3a3a3a; border-radius: 50%; background: transparent; }
+.landing-details .accord-toggle svg { width: 16px; height: 16px; }
+.landing-details .accord-item.open .accord-toggle { background: #e6e6e3; }
+.landing-details .accord-inner { padding: 4px 32px 36px 87px; }
+.landing-details .narrative-inner { max-width: 830px; }
+.landing-details .narrative-inner p { color: #a6a6a6; font: 400 16px/1.75 var(--font-sans); margin: 0 0 18px; }
+.landing-details .narrative-inner .highlight { background: #ffffff03; border-color: #a8a8a8; margin: 25px 0; }
+.landing-details .narrative-inner .highlight p { margin: 0; color: #e4e4e4; }
+.landing-details strong { color: #e4e4e4; font-weight: 500; }
+.landing-details .protocol-flow, .landing-details .tech-grid { gap: 14px; margin: 0; }
+.landing-details .protocol-flow { grid-template-columns: 1fr; gap: 0; }
+.landing-details .tech-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.landing-details .flow-step, .landing-details .tech-card { padding: 24px; border: 1px solid #262626; border-radius: 10px; background: #101010; transition: none; }
+.landing-details .flow-step { display: grid; grid-template-columns: 36px 1fr; gap: 24px; border: 0; border-bottom: 1px solid #262626; border-radius: 0; background: none; padding: 26px 0; }
+.landing-details .flow-step:last-child { border-bottom: 0; }
+.landing-details .flow-step .step-num { font: 400 12px/26px var(--mono); color: #999; }
+.landing-details .tech-card .tag { padding: 0; border: 0; color: #999; font: 400 12px var(--font-sans); letter-spacing: 0; text-transform: none; margin-bottom: 13px; }
+.landing-details .flow-step h4, .landing-details .tech-card h4 { margin: 0 0 12px; font: 500 20px/1.3 var(--font-sans); letter-spacing: -.02em; text-transform: none; }
+.landing-details .flow-step p, .landing-details .tech-card p { margin: 0; color: #a6a6a6; font: 400 14px/1.75 var(--font-sans); }
+.landing-details .manifesto-inner { max-width: 830px; padding: 8px 0 0; text-align: left; }
+.landing-details .manifesto-inner h4 { font: 400 clamp(30px, 3vw, 40px)/1.12 var(--font-accent); letter-spacing: 0; margin: 0 0 28px; text-transform: none; }
+.landing-details .manifesto-inner h4 span { color: #909090; }
+.landing-details .manifesto-line { font: 400 17px/1.8 var(--font-sans); color: #a6a6a6; }
+.landing-details .manifesto-sep { margin-block: 28px; }
+
+.wallet-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.wallet-card { min-width: 0; min-height: 366px; display: flex; flex-direction: column; padding: 32px; border: 1px solid #292929; border-radius: 16px; background: linear-gradient(145deg, #101010, #080808 66%); box-shadow: inset 0 1px 0 #ffffff06; transition: border-color .25s ease, box-shadow .25s ease; }
+.wallet-card:hover { border-color: #3a3a3a; box-shadow: inset 0 1px 0 #ffffff0b; }
+.wallet-card-brand { display: flex; align-items: center; min-height: 40px; margin-bottom: 34px; color: #d9d9d5; }
+.wallet-zcash-wordmark { display: block; width: 170px; height: 32px; object-fit: contain; }
+.wallet-chain-logos { display: flex; align-items: center; gap: 14px; }
+.wallet-chain-logos img { display: block; width: 30px; height: 30px; object-fit: contain; filter: grayscale(1); }
+.wallet-key { width: 38px; height: 38px; }
+.wallet-card-label { margin-bottom: 10px; color: #898989; font: 400 12px/1.4 var(--font-sans); }
+.wallet-card h3 { margin: 0 0 14px; color: #e6e6e6; font: 500 24px/1.25 var(--font-sans); letter-spacing: -.025em; }
+.wallet-card p { margin: 0; color: #a6a6a6; font: 400 15px/1.7 var(--font-sans); }
+.wallet-card-detail { margin-top: auto; padding-top: 28px; color: #838383; font: 400 12px/1.6 var(--font-sans); }
+.details-link { display: inline-flex; align-items: center; gap: 20px; color: #ddd; font: 500 14px/1.6 var(--font-sans); }
+.details-link:hover { color: #fff; text-decoration: underline; text-underline-offset: 5px; }
+.details-link { margin-top: 12px; }
+.wallet-footnote { display: flex; justify-content: space-between; align-items: start; gap: 48px; margin-top: 28px; padding-top: 25px; border-top: 1px solid #252525; }
+.wallet-footnote p { max-width: 770px; margin: 0; color: #929292; font: 400 13px/1.75 var(--font-sans); }
+.wallet-footnote a { display: inline-flex; align-items: center; gap: 14px; flex-shrink: 0; color: #ddd; font: 400 13px/1.6 var(--font-sans); min-height: 36px; text-decoration: none; }
+.wallet-footnote a:hover { color: #fff; text-decoration: underline; text-underline-offset: 5px; }
+.wallet-footnote a:focus-visible { outline: 1px solid #ddd; outline-offset: 5px; }
+
+@media (max-width: 1000px) {
+  .landing-details .accord-inner { padding-left: 32px; }
+  .landing-details .tech-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wallet-grid { gap: 12px; }
+  .wallet-card { padding: 24px; }
+  .wallet-card h3 { font-size: 22px; }
+  .wallet-card p { font-size: 14px; }
+  .wallet-footnote { flex-direction: column; gap: 12px; }
+}
+
+@media (max-width: 700px) {
+  .landing-details .accord-header { min-height: 94px; padding: 23px 20px; gap: 15px; }
+  .landing-details .accord-header:hover { padding-left: 20px; }
+  .landing-details .accord-left { gap: 12px; }
+  .landing-details .accord-num { min-width: 23px; font-size: 10px; }
+  .landing-details .accord-title { font-size: 20px; }
+  .landing-details .accord-toggle { width: 28px; height: 28px; }
+  .landing-details .accord-inner { padding: 0 20px 24px; }
+  .landing-details .narrative-inner p { font-size: 15px; }
+  .landing-details .protocol-flow, .landing-details .tech-grid { grid-template-columns: 1fr; }
+  .landing-details .flow-step, .landing-details .tech-card { padding: 20px; }
+  .wallet-grid { grid-template-columns: 1fr; gap: 14px; }
+  .wallet-card { min-height: 330px; padding: 26px; }
+  .wallet-card-brand { margin-bottom: 28px; }
+  .wallet-card p { font-size: 15px; }
+  .landing-details .flow-step { padding: 22px 0; gap: 12px; }
+}

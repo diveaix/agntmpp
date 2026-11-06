@@ -1,10 +1,11 @@
 /**
- * ./AGNT Protocol - DEX helper tools.
+ * ./AGENT Protocol - DEX helper tools.
  * Normal user swaps use the hardened Jumper/LI.FI aggregator in bridges.ts.
  * Direct DEX live swaps are disabled until quoter-backed min-out is implemented.
  */
 
 import type { ToolModule } from './index.js'
+import { isRemovedIntegration } from './integration-policy.js'
 import { getOrCreateWallet, getAccount } from '../wallet.js'
 import { getPublicClient, getWalletClient as getChainsWalletClient, explorerTxUrl, SUPPORTED_CHAINS } from '../chains.js'
 import { parseUnits, formatUnits } from 'viem'
@@ -326,6 +327,10 @@ async function executeRouterSwap(
 // ─── Handlers ────────────────────────────────────────────
 
 async function handle(name: string, args: Record<string, unknown>) {
+  if (name === 'uniswap' || name === 'pancakeswap') {
+    if ([args.chain, args.tokenIn, args.tokenOut, args.token0, args.token1].some(isRemovedIntegration)) return err('This integration is not supported.')
+    if (args.chain && !SUPPORTED_CHAINS[String(args.chain).toLowerCase()]) return err('Unsupported chain.')
+  }
   if (name === 'uniswap') {
     switch (args.action) {
       case 'swap': {

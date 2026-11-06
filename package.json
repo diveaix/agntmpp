@@ -1,10 +1,21 @@
 {
   "name": "@agnt/mcp",
   "version": "2.1.0",
-  "description": "Agent-native DeFi toolkit — 56 MPP-enabled MCP tools with pay-per-call via USDC.e",
+  "description": "Agent-native multi-chain DeFi toolkit and MCP server",
   "type": "module",
   "bin": {
     "agnt-mcp": "./bin/agnt-mcp.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "!src/**/*.test.ts",
+    "public",
+    ".env.example",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
     "dev": "concurrently \"vite\" \"node --import tsx/esm --watch src/server/index.ts\" \"tsx src/mcp/serve.ts\"",
@@ -12,43 +23,71 @@
     "dev:server": "tsx watch src/server/index.ts",
     "build": "vite build",
     "start": "npm run mcp:serve",
+    "start:web": "node --import tsx/esm src/server/index.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "mcp:serve": "tsx src/mcp/serve.ts"
+    "mcp:serve": "tsx src/mcp/serve.ts",
+    "typecheck": "tsc --noEmit",
+    "sale:migrate": "tsx scripts/sale-migrate.ts",
+    "sale:reconcile": "tsx scripts/sale-reconcile.ts",
+    "sale:notify": "tsx scripts/sale-notify.ts",
+    "sale:status": "tsx scripts/sale-status.ts",
+    "sale:signer:status": "tsx scripts/sale-signer-status.ts",
+    "sale:receipt:verify": "tsx scripts/sale-verify-receipt.ts",
+    "sale:receipt:sign": "tsx scripts/sale-sign-receipt.ts",
+    "sale:scan": "tsx scripts/sale-scan.ts",
+    "sale:sign": "tsx scripts/sale-sign.ts",
+    "sale:payout": "tsx scripts/sale-payout.ts",
+    "sale:signer:migrate": "tsx scripts/sale-signer-migrate.ts",
+    "sale:test:postgres": "tsx scripts/test-sale-postgres.ts",
+    "sale:test:zcash-node": "tsx scripts/test-sale-zcash-node.ts",
+    "sale:test:zcash-fork": "tsx scripts/test-sale-zcash-node.ts --fork",
+    "sale:test:zcash-funded-fork": "tsx scripts/test-sale-zcash-node.ts --wallet --signing --deposits --fork-deposit",
+    "sale:test:zcash-paid-fork": "tsx scripts/test-sale-zcash-node.ts --wallet --signing --deposits --fork-paid",
+    "sale:test:zcash-wallet": "tsx scripts/test-sale-zcash-node.ts --wallet",
+    "sale:test:zcash-signing": "tsx scripts/test-sale-zcash-node.ts --wallet --signing",
+    "sale:test:zcash-deposits": "tsx scripts/test-sale-zcash-node.ts --wallet --signing --deposits",
+    "test": "node scripts/run-tests.mjs",
+    "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@hono/node-server": "^1.14.1",
-    "@modelcontextprotocol/sdk": "^1.12.1",
-    "@nktkas/hyperliquid": "^0.32.2",
-    "@polymarket/clob-client-v2": "^1.0.2",
+    "@hono/node-server": "^1.19.17",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tailwindcss/vite": "^4.2.4",
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.4.1",
+    "express-rate-limit": "^8.7.0",
     "framer-motion": "^12.38.0",
-    "hono": "^4.7.10",
+    "hono": "^4.13.7",
     "jsonwebtoken": "^9.0.3",
-    "mppx": "^0.5.13",
+    "pg": "^8.23.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.5.0",
+    "react-router-dom": "^7.18.3",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.4",
+    "three": "^0.186.0",
     "tsx": "^4.21.0",
     "uuid": "^14.0.0",
-    "viem": "^2.48.4"
+    "viem": "^2.56.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.15.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
     "typescript": "^5.8.3",
-    "vite": "^6.3.2"
+    "vite": "^6.4.3"
+  },
+  "overrides": {
+    "ws": "^8.21.0"
   }
 }

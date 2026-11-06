@@ -1,32 +1,23 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getToolPrice, getToolTier, isFreeTool, isMppPaymentGateEnabled } from '../pricing.js'
+import { getToolPrice, getToolTier } from '../pricing.js'
+import { handleTool } from './index.js'
 
-test('MPP payment gate is disabled by default for API-key access', () => {
-  const previous = process.env.AGNT_MPP_ENABLED
-  try {
-    delete process.env.AGNT_MPP_ENABLED
-
-    assert.equal(isMppPaymentGateEnabled(), false)
-    assert.equal(getToolTier('account'), 'free')
-    assert.equal(getToolTier('billing'), 'free')
-    assert.equal(getToolTier('hyperliquid'), 'free')
-    assert.equal(getToolPrice('wallet'), '0')
-    assert.equal(isFreeTool('polymarket'), true)
-  } finally {
-    if (previous === undefined) delete process.env.AGNT_MPP_ENABLED
-    else process.env.AGNT_MPP_ENABLED = previous
-  }
+test('tool calls have no per-call charge under account access', () => {
+  assert.equal(getToolTier('wallet'), 'free')
+  assert.equal(getToolPrice('wallet'), '0')
 })
 
-test('MPP payment gate can be enabled explicitly', () => {
+test('obsolete payment gate fails closed even with supplied credentials', async () => {
   const previous = process.env.AGNT_MPP_ENABLED
   try {
     process.env.AGNT_MPP_ENABLED = 'true'
-
-    assert.equal(isMppPaymentGateEnabled(), true)
-    assert.equal(getToolTier('account'), 'standard')
-    assert.equal(getToolPrice('account'), '0.001')
+    const result = await handleTool('wallet', { action: 'list' }, {
+      'org.paymentauth/credential': { source: 'payer', payload: { hash: 'payment' } },
+    })
+    assert.equal(result.isError, true)
+    assert.match(result.content[0].text, /no longer supported/)
+    assert.equal(result._meta, undefined)
   } finally {
     if (previous === undefined) delete process.env.AGNT_MPP_ENABLED
     else process.env.AGNT_MPP_ENABLED = previous

@@ -1,0 +1,121 @@
+.gateway-glass-shell,
+.gateway-glass-rim {
+  position: absolute;
+  width: 360px;
+  height: 260px;
+  left: -180px;
+  top: -148px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.gateway-glass-rim { z-index: 2; }
+
+.gateway-glass-face {
+  position: absolute;
+  box-sizing: border-box;
+  width: 240px;
+  height: 240px;
+  left: -120px;
+  top: -156px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  transform: rotateX(54deg) rotateZ(34deg);
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(138deg, #ffffff21, #ffffff08 48%, #ffffff16), rgba(16, 16, 15, calc(.34 + var(--gateway-press, 0) * .4));
+  backdrop-filter: blur(13px) saturate(.25);
+  -webkit-backdrop-filter: blur(13px) saturate(.25);
+  box-shadow: inset 0 1px 10px #ffffff12, inset 0 -1px 6px #00000030, 0 0 0 1px #080808;
+}
+
+.gateway-glass-face::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1px solid #ffffff0a;
+  border-radius: 11px;
+  pointer-events: none;
+}
+
+.gateway-glass-face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(128deg, transparent 8%, #ffffff05 22%, #ffffff16 25%, transparent 28%, transparent 76%, #ffffff06 90%);
+  pointer-events: none;
+}
+
+.gateway-glass-brand {
+  position: relative;
+  color: #f2f2f2;
+  font: 600 39px/1 var(--font-sans, Arial, sans-serif);
+  letter-spacing: -2px;
+  text-shadow: none;
+}
+
+.gateway-glass-circuit {
+  position: absolute;
+  inset: 32px;
+  border: 1px solid #ffffff09;
+  border-radius: 8px;
+  background: linear-gradient(#ffffff09, #ffffff09) 50% 0 / 1px 21px no-repeat, linear-gradient(#ffffff09, #ffffff09) 50% 100% / 1px 21px no-repeat;
+}
+
+.gateway-glass-indicators { position: absolute; bottom: 25px; display: flex; gap: 5px; }
+.gateway-glass-indicators i { width: 10px; height: 2px; background: #65655d; transition: background .35s ease; }
+.gateway-stage[data-phase='pressing'] .gateway-glass-indicators i:first-child,
+.gateway-stage[data-phase='shielding'] .gateway-glass-indicators i,
+.gateway-stage[data-phase='lifting'] .gateway-glass-indicators i { background: #d6d6d6; }
+
+.gateway-glass-inscription {
+  position: relative;
+  color: #bcbcbc;
+  font: 500 7px/1 var(--font-sans, Arial, sans-serif);
+  letter-spacing: 2.1px;
+}
+
+.gateway-glass-fastener {
+  position: absolute;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #ffffff38;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #363636, #171717);
+  box-shadow: inset 0 1px 2px #000000bf, 0 1px 0 #ffffff42;
+}
+
+.gateway-glass-fastener::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #777, #393939 55%, #555);
+  box-shadow: inset 0 .5px 1px #ffffff65;
+}
+
+.gateway-glass-fastener::after {
+  content: '';
+  position: absolute;
+  width: 5px;
+  height: 1px;
+  top: 4.5px;
+  left: 2.5px;
+  background: #222;
+  transform: rotate(-35deg);
+  box-shadow: 0 .5px 0 #ffffff30;
+}
+
+.gateway-glass-fastener-a { top: 13px; left: 13px; }
+.gateway-glass-fastener-b { top: 13px; right: 13px; }
+.gateway-glass-fastener-c { bottom: 13px; right: 13px; }
+.gateway-glass-fastener-d { bottom: 13px; left: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gateway-glass-indicators i { transition: none; }
+}

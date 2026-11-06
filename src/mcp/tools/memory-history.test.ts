@@ -14,10 +14,10 @@ test('memory history is scoped to the active wallet by default', async () => {
   const memoryTool = (await import('./memory.js')).default
 
   const walletOne = createWallet('wallet one')
-  autoRemember('tempo_swap', {
+  autoRemember('uniswap', {
     action: 'swap',
     amount: 1,
-    tokenIn: 'USDC.e',
+    tokenIn: 'USDC',
     tokenOut: 'pathUSD',
   }, 'Swapped from wallet one', {
     walletName: walletOne.name,
@@ -25,10 +25,10 @@ test('memory history is scoped to the active wallet by default', async () => {
   })
 
   const walletTwo = createWallet('wallet two')
-  autoRemember('tempo_swap', {
+  autoRemember('uniswap', {
     action: 'swap',
     amount: 2,
-    tokenIn: 'USDC.e',
+    tokenIn: 'USDC',
     tokenOut: 'pathUSD',
   }, 'Swapped from wallet two', {
     walletName: walletTwo.name,

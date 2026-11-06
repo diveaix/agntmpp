@@ -91,13 +91,15 @@ export async function resolveRouteAmount(input: {
   account: `0x${string}`
   client: PublicClient
   nativeReserve?: unknown
+  nativeSymbol?: string
 }): Promise<bigint> {
   if (!isMaxRouteAmount(input.amount)) return parseRouteAmount(input.amount, input.decimals)
   if (isNativeToken(input.token)) {
     const reserve = parseRouteAmount(input.nativeReserve ?? process.env.AGNT_NATIVE_MAX_RESERVE_ETH ?? '0.0005', 18)
     const balance = await input.client.getBalance({ address: input.account })
+    const symbol = input.nativeSymbol || 'native ETH'
     if (balance <= reserve) {
-      throw new Error(`Not enough native ETH to keep a gas reserve. Balance ${formatUnits(balance, 18)} ETH, reserve ${formatUnits(reserve, 18)} ETH.`)
+      throw new Error(`Not enough ${symbol} to keep a gas reserve. Balance ${formatUnits(balance, 18)} ${symbol}, reserve ${formatUnits(reserve, 18)} ${symbol}.`)
     }
     return balance - reserve
   }
@@ -112,12 +114,13 @@ export async function resolveRouteAmount(input: {
 export async function estimateNativeTxCost(
   client: PublicClient,
   tx: { account: `0x${string}`; to: `0x${string}`; data?: `0x${string}`; value?: bigint },
+  minimumGasPrice = 0n,
 ): Promise<bigint> {
   const [gas, gasPrice] = await Promise.all([
     client.estimateGas(tx),
     client.getGasPrice(),
   ])
-  return gas * gasPrice
+  return gas * (gasPrice > minimumGasPrice ? gasPrice : minimumGasPrice)
 }
 
 export async function assertNativeBalanceCoversTx(input: {
@@ -127,6 +130,8 @@ export async function assertNativeBalanceCoversTx(input: {
   data?: `0x${string}`
   value?: bigint
   chain: string
+  nativeSymbol?: string
+  minimumGasPrice?: bigint
 }): Promise<{ balance: bigint; gasCost: bigint; totalCost: bigint }> {
   const value = input.value ?? 0n
   const [balance, gasCost] = await Promise.all([
@@ -136,13 +141,13 @@ export async function assertNativeBalanceCoversTx(input: {
       to: input.to,
       data: input.data,
       value,
-    }),
+    }, input.minimumGasPrice),
   ])
   const buffer = gasCost / 5n
   const totalCost = value + gasCost + buffer
   if (balance < totalCost) {
     throw new Error(
-      `Not enough ${input.chain} ETH for this route. Balance ${formatUnits(balance, 18)} ETH, route value ${formatUnits(value, 18)} ETH, estimated gas ${formatUnits(gasCost, 18)} ETH, buffer ${formatUnits(buffer, 18)} ETH. Try a smaller amount or fund more gas.`
+      `Not enough ${input.nativeSymbol || 'native token'} on ${input.chain} for this route. Balance ${formatUnits(balance, 18)}, route value ${formatUnits(value, 18)}, estimated gas ${formatUnits(gasCost, 18)}, buffer ${formatUnits(buffer, 18)}. Try a smaller amount or fund more gas.`
     )
   }
   return { balance, gasCost, totalCost }

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'crypto'
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto'
 import type { AccessUser, AuthContext, DashboardSession } from './access-types.js'
 import {
   createDashboardSession,
@@ -47,6 +47,12 @@ export interface DashboardSessionContext {
   auth: AuthContext
 }
 
+// HTTP profile projection. Never serialize the storage record: it can contain
+// password verifiers, and future private fields must stay private by default.
+export function publicDashboardUser(user:AccessUser) {
+  return {id:user.id,email:user.email,walletAddress:user.walletAddress,status:user.status,createdAt:user.createdAt,updatedAt:user.updatedAt}
+}
+
 export interface DashboardPasswordAuthInput {
   email: string
   password: string
@@ -56,6 +62,8 @@ export interface DashboardPasswordResetInput extends DashboardPasswordAuthInput 
   code: string
   now?: number
 }
+
+export type DashboardVerifiedSignupInput = DashboardPasswordResetInput
 
 const DEFAULT_EMAIL_TTL_MS = 10 * 60_000
 const DEFAULT_SESSION_TTL_MS = 30 * 24 * 60 * 60_000
@@ -72,7 +80,7 @@ function secureEqualHex(a: string, b: string): boolean {
 }
 
 function generateCode(): string {
-  return randomBytes(3).readUIntBE(0, 3).toString().padStart(6, '0').slice(0, 6)
+  return randomInt(0,1_000_000).toString().padStart(6,'0')
 }
 
 function generateSessionToken(): string {
@@ -80,7 +88,7 @@ function generateSessionToken(): string {
 }
 
 function shouldReturnDevCode(): boolean {
-  return process.env.AGNT_EMAIL_PROVIDER === 'console' || process.env.NODE_ENV !== 'production'
+  return process.env.NODE_ENV !== 'production'
 }
 
 function resolveOrCreateDashboardAuth(email: string, customStorePath?: string): { user: AccessUser; auth: AuthContext } {
@@ -121,7 +129,10 @@ export function loginDashboard(input: DashboardPasswordAuthInput, customStorePat
   return createSessionForUser(user, customStorePath)
 }
 
-export function startEmailLogin(emailInput: string, customStorePath?: string, options: StartEmailLoginOptions = {}): StartEmailLoginResult {
+function createEmailLoginCode(emailInput: string, customStorePath?: string, options: StartEmailLoginOptions = {}): {
+  code: string
+  result: StartEmailLoginResult
+} {
   const email = normalizeEmailAddress(emailInput)
   if (!email || !email.includes('@')) throw new Error('Enter a valid email address.')
   const now = options.now ?? Date.now()
@@ -129,10 +140,56 @@ export function startEmailLogin(emailInput: string, customStorePath?: string, op
   const code = generateCode()
   const expiresAt = new Date(now + ttlMs).toISOString()
   createEmailVerificationCode({ email, codeHash: hashSecret(code), expiresAt }, customStorePath)
-  if (process.env.AGNT_EMAIL_PROVIDER === 'console' || process.env.NODE_ENV !== 'production') {
-    console.log(`[Email] AGNT login code for ${email}: ${code}`)
+  return { code, result: { email, expiresAt, devCode: shouldReturnDevCode() ? code : undefined } }
+}
+
+export function startEmailLogin(emailInput: string, customStorePath?: string, options: StartEmailLoginOptions = {}): StartEmailLoginResult {
+  if(process.env.NODE_ENV==='production')throw new Error('Production email login requires verified delivery.')
+  const { result } = createEmailLoginCode(emailInput, customStorePath, options)
+  return result
+}
+
+/** Create and deliver a one-time code. Production delivery uses a small provider-neutral webhook contract. */
+export async function startEmailLoginWithDelivery(
+  emailInput: string,
+  customStorePath?: string,
+  options: StartEmailLoginOptions = {},
+): Promise<StartEmailLoginResult> {
+  if(process.env.NODE_ENV==='production'&&(process.env.AGNT_EMAIL_PROVIDER!=='webhook'||!process.env.AGNT_EMAIL_WEBHOOK_URL))throw new Error('Production email delivery is not configured.')
+  const { code, result } = createEmailLoginCode(emailInput, customStorePath, options)
+  if (process.env.NODE_ENV !== 'production') {
+    return result
   }
-  return { email, expiresAt, devCode: shouldReturnDevCode() ? code : undefined }
+
+  const endpoint = process.env.AGNT_EMAIL_WEBHOOK_URL
+  if (process.env.AGNT_EMAIL_PROVIDER !== 'webhook' || !endpoint) {
+    throw new Error('Production email delivery is not configured.')
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(process.env.AGNT_EMAIL_WEBHOOK_SECRET
+          ? { authorization: `Bearer ${process.env.AGNT_EMAIL_WEBHOOK_SECRET}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        to: result.email,
+        template: 'agnt_login_code',
+        code,
+        expiresAt: result.expiresAt,
+      }),
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(`Email provider returned HTTP ${response.status}.`)
+    return { email: result.email, expiresAt: result.expiresAt }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function consumeEmailCode(input: VerifyEmailLoginInput, customStorePath?: string): { email: string; now: number } {
@@ -167,6 +224,17 @@ export function verifyEmailLogin(input: VerifyEmailLoginInput, customStorePath?:
   const { email, now } = consumeEmailCode(input, customStorePath)
   const { user } = resolveOrCreateDashboardAuth(email, customStorePath)
   return createSessionForUser(user, customStorePath, now)
+}
+
+export function signupDashboardVerified(input: DashboardVerifiedSignupInput, customStorePath?: string): VerifyEmailLoginResult {
+  const email = normalizeEmailAddress(input.email)
+  if (!email || !email.includes('@')) throw new Error('Enter a valid email address.')
+  if (typeof input.password !== 'string' || input.password.trim().length < 8) throw new Error('Password must be at least 8 characters.')
+  if (userHasPassword(findUserByEmail(email, customStorePath))) {
+    throw new Error('This email already has a dashboard password. Use Login instead.')
+  }
+  consumeEmailCode(input, customStorePath)
+  return signupDashboard(input, customStorePath)
 }
 
 export function resetDashboardPassword(input: DashboardPasswordResetInput, customStorePath?: string): VerifyEmailLoginResult {

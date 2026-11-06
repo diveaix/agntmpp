@@ -1,0 +1,33 @@
+.pass-sale{max-width:1040px;margin:130px auto 80px;padding:0 24px;color:var(--white,#eee);font-family:'Space Mono',monospace}
+.pass-eyebrow{font-size:11px;letter-spacing:3px;color:#aaa}.pass-sale h1{font-size:clamp(34px,6vw,64px);line-height:1.1;margin:22px 0}.pass-lead{max-width:760px;line-height:1.8;color:#bbb;font-size:14px}
+.pass-status{padding:16px 0;font-size:12px;letter-spacing:1px}.pass-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:24px 0}.pass-metrics>div{border-top:1px solid #333;padding:18px 0}.pass-metrics span,.pass-metrics strong{display:block}.pass-metrics span{font-size:11px;color:#aaa;margin-bottom:12px}.pass-metrics strong{font-size:15px}
+.pass-columns{display:grid;grid-template-columns:1fr 1fr;gap:20px}.pass-panel{border:1px solid #333;border-radius:14px;padding:24px;margin-bottom:20px;background:#0b0b0b}.pass-panel h2{font-size:20px;margin:0 0 18px}.pass-panel h3{font-size:14px;margin-top:24px}.pass-panel p,.pass-panel li{font-size:12px;line-height:1.9;color:#bbb}.pass-panel a{color:#fff;text-decoration:underline}.pass-panel label{display:block;font-size:12px;margin:18px 0 8px}.pass-panel input[type=number]{width:100%;box-sizing:border-box;background:#111;border:1px solid #555;color:white;padding:12px;font:inherit;border-radius:6px}.pass-panel button{padding:12px 18px;border-radius:24px;margin:12px 8px 0 0;border:1px solid #777;background:#eee;color:#111;font:inherit;font-size:12px;cursor:pointer}.pass-panel button:disabled{opacity:.45;cursor:not-allowed}.pass-panel button:focus-visible,.pass-panel input:focus-visible{outline:2px solid #ddd;outline-offset:4px}.pass-quote{margin-top:24px}.pass-consent{line-height:1.8}.pass-consent input{margin-right:8px}.pass-error{color:#fca5a5;overflow-wrap:anywhere}.pass-panel dl{font-size:12px;line-height:2}.pass-panel dd{margin:0 0 12px}.pass-holdings{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}.pass-holdings>div{padding:20px;border:1px solid #444;border-radius:10px}.pass-holdings span,.pass-holdings strong{display:block;font-size:12px;margin:8px 0}.pass-panel code{overflow-wrap:anywhere}
+.pass-panel input:not([type]){width:100%;box-sizing:border-box;background:#111;border:1px solid #555;color:white;padding:12px;font:inherit;border-radius:6px}
+@media(max-width:680px){.pass-columns{grid-template-columns:1fr}.pass-metrics{grid-template-columns:1fr 1fr}.pass-sale{padding:0 16px;margin-top:110px}.pass-panel{padding:18px}}
+.pass-sale { width: min(1280px, calc(100% - 112px)); max-width: none; margin: 150px auto 100px; padding: 0; color: #ececec; font-family: var(--font-sans); }
+.pass-eyebrow { color: #929292; font-size: 12px; letter-spacing: .12em; }
+.pass-sale h1 { margin: 24px 0; font: 400 clamp(44px, 5.4vw, 76px)/1.05 var(--font-accent); }
+.pass-lead { max-width: 690px; font-size: 17px; line-height: 1.7; color: #a6a6a6; }
+.pass-status { margin-top: 28px; color: #b3b3b3; font-size: 13px; letter-spacing: 0; }
+.pass-metrics { margin: 16px 0 40px; gap: 24px; }
+.pass-metrics > div { padding: 24px 0; border-color: #292929; }
+.pass-metrics span { font-size: 13px; }
+.pass-metrics strong { font-size: clamp(16px, 1.8vw, 24px); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pass-panel { background: #0c0c0c; border-color: #292929; padding: 30px; min-width: 0; }
+.pass-panel h2 { font: 500 26px/1.25 var(--font-sans); letter-spacing: -.03em; }
+.pass-panel h3 { font-size: 18px; }
+.pass-panel p, .pass-panel li, .pass-panel dl { font-size: 15px; line-height: 1.75; }
+.pass-panel label { font-size: 14px; line-height: 1.6; }
+.pass-panel button { min-height: 44px; padding: 11px 19px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+.pass-panel button:disabled { opacity: .5; }
+.pass-panel input[type=number], .pass-panel input:not([type]) { border-color: #333; min-height: 46px; font-size: 16px; }
+.pass-holdings span, .pass-holdings strong { font-size: 14px; }
+.pass-error { font-size: 14px; line-height: 1.6; }
+@media (max-width: 1000px) { .pass-sale { width: calc(100% - 64px); } }
+@media (max-width: 680px) {
+  .pass-sale { width: calc(100% - 36px); margin: 112px auto 70px; }
+  .pass-sale h1 { font-size: clamp(38px, 10vw, 58px); }
+  .pass-panel { padding: 24px 20px; }
+  .pass-metrics { gap: 12px; }
+  .pass-lead { font-size: 16px; }
+}

@@ -32,7 +32,7 @@ const erc20TransferAbi = [
 
 export function normalizeSendChain(value: unknown): string {
   const chain = String(value || '').trim().toLowerCase()
-  if (!chain) throw new Error('Missing chain. Use base, arbitrum, optimism, polygon, ethereum, avalanche, bsc, linea, zksync, hyperevm, or tempo.')
+  if (!chain) throw new Error('Missing chain. Use base, arbitrum, optimism, polygon, ethereum, avalanche, bsc, linea, zksync, or abstract.')
   if (!SUPPORTED_CHAINS[chain]) throw new Error(`Unknown chain "${chain}". Available: ${Object.keys(SUPPORTED_CHAINS).join(', ')}`)
   return chain
 }
@@ -150,14 +150,13 @@ export async function executeWalletSend(args: Record<string, unknown>): Promise<
 
   const chain = normalizeSendChain(args.chain)
   const to = normalizeRecipient(args.to)
-  const tokenInput = String(args.token || 'ETH').trim()
+  const tokenInput = String(args.token || 'native').trim()
   const wallet = getOrCreateWallet()
   const account = getAccount(wallet)
   const client = getPublicClient(chain)
   const walletClient = getWalletClient(chain, wallet)
   const chainConfig = SUPPORTED_CHAINS[chain]
   const native = isNativeToken(tokenInput)
-
   if (native) {
     const maxAmount = isMaxRouteAmount(args.amount)
     const amount = await resolveRouteAmount({
@@ -166,10 +165,11 @@ export async function executeWalletSend(args: Record<string, unknown>): Promise<
       token: tokenInput,
       account: wallet.address,
       client,
-      nativeReserve: args.nativeReserveEth,
+      nativeReserve: args.nativeReserve ?? args.nativeReserveEth,
+      nativeSymbol: chainConfig.nativeSymbol,
     })
     if (amount <= 0n) throw new Error('Send amount must be greater than zero.')
-    const tokenLabel = chain === 'bsc' ? 'BNB' : chain === 'polygon' ? 'MATIC' : chain === 'avalanche' ? 'AVAX' : 'ETH'
+    const tokenLabel = chainConfig.nativeSymbol
 
     const preflight = await assertNativeBalanceCoversTx({
       client,
@@ -177,6 +177,7 @@ export async function executeWalletSend(args: Record<string, unknown>): Promise<
       to,
       value: amount,
       chain,
+      nativeSymbol: chainConfig.nativeSymbol,
     })
 
     if (action === 'quote') {
@@ -264,6 +265,7 @@ export async function executeWalletSend(args: Record<string, unknown>): Promise<
     data,
     value: 0n,
     chain,
+    nativeSymbol: chainConfig.nativeSymbol,
   })
 
   if (action === 'quote') {
@@ -319,16 +321,17 @@ export async function executeWalletSend(args: Record<string, unknown>): Promise<
 const TOOLS = [
   {
     name: 'wallet_send',
-    description: 'Send native ETH/gas tokens or ERC-20 tokens from the active AGNT wallet on any supported EVM chain.',
+    description: 'Send a native gas token or ERC-20 token from the active AGENT wallet on any supported EVM chain.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         action: { type: 'string', enum: ['quote', 'send', 'status'], description: 'quote simulates gas and balance checks; send submits the transfer; status checks a tx hash.' },
-        chain: { type: 'string', description: 'Chain key: base, arbitrum, optimism, polygon, ethereum, avalanche, bsc, linea, zksync, hyperevm, tempo.' },
-        token: { type: 'string', description: 'ETH/native, a known symbol like USDC/USDT/WETH, or a token contract address.' },
+        chain: { type: 'string', description: 'Chain key: base, arbitrum, optimism, polygon, ethereum, avalanche, bsc, linea, zksync, abstract.' },
+        token: { type: 'string', description: 'native, a known symbol like USDC/USDT/WETH, or a token contract address.' },
         to: { type: 'string', description: 'Recipient 0x address.' },
         amount: { type: 'string', description: 'Amount to send, or all/max. Native all/max keeps a gas reserve.' },
-        nativeReserveEth: { type: 'string', description: 'Optional native reserve for all/max native sends. Default AGNT_NATIVE_MAX_RESERVE_ETH or 0.0005.' },
+        nativeReserve: { type: 'string', description: 'Optional native-token reserve for all/max sends.' },
+        nativeReserveEth: { type: 'string', description: 'Deprecated alias for nativeReserve.' },
         confirm: { type: 'boolean', description: 'Required for all/max sends or sends above configured thresholds.' },
         hash: { type: 'string', description: 'Transaction hash for status checks.' },
       },

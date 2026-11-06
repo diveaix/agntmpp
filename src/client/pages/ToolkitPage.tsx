@@ -1,119 +1,148 @@
-import Terminal from '../components/Terminal'
-import Accordion, { AccordionItem } from '../components/Accordion'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import Footer from '../components/Footer'
 import Nav from '../components/Nav'
-import { Link } from 'react-router-dom'
+import Accordion, { AccordionItem } from '../components/Accordion'
+import '../toolkit.css'
+
+const MCP_URL = 'https://mcp.agntmpp.xyz/mcp'
+const clients = [
+  {
+    id: 'claude', name: 'Claude', detail: 'Web & desktop', logo: '/claude-color.svg',
+    heading: 'Add ./AGENT to Claude.',
+    steps: ['Open Customize → Connectors in Claude.', 'Choose Add custom connector. Name it ./AGENT and paste the server URL below.', 'Add the connector, then enable ./AGENT in your conversation.'],
+    action: 'Open Claude', href: 'https://claude.ai/settings/connectors',
+    docs: 'https://support.claude.com/en/articles/11176164-use-connectors-to-extend-claude-s-capabilities',
+  },
+  {
+    id: 'cursor', name: 'Cursor', detail: 'Editor', logo: '/cursor-for-terminal.svg',
+    heading: 'Bring execution to Cursor.',
+    steps: ['Use Add to Cursor to open the MCP installation prompt.', 'Review the server in Cursor and add ./AGENT.', 'Open an agent conversation and ask ./AGENT to take an action.'],
+    action: 'Add to Cursor', href: `cursor://anysphere.cursor-deeplink/mcp/install?name=agent&config=${encodeURIComponent(btoa(JSON.stringify({ url: MCP_URL })))}`,
+    code: JSON.stringify({ mcpServers: { agent: { url: MCP_URL } } }, null, 2), codeLabel: 'Or add to .cursor/mcp.json',
+    docs: 'https://cursor.com/docs/mcp/install-links',
+  },
+  {
+    id: 'codex', name: 'Codex', detail: 'App & CLI', logo: '/codex-color.svg',
+    heading: 'Connect ./AGENT to Codex.',
+    steps: ['Run the command below in your terminal.', 'Open Codex and check ./AGENT in your MCP server settings.', 'Start a conversation with the tools available to your agent.'],
+    code: `codex mcp add agent --url ${MCP_URL}`, codeLabel: 'Add the MCP server',
+    docs: 'https://developers.openai.com/codex/mcp',
+  },
+  {
+    id: 'claude-code', name: 'Claude Code', detail: 'Terminal', logo: '/claudecode-color.svg',
+    heading: 'One command. Your tools.',
+    steps: ['Run the command below in your terminal.', 'Open Claude Code and use /mcp to review the connection.', 'Ask your agent to create a wallet or execute a transaction.'],
+    code: `claude mcp add --transport http agent ${MCP_URL}`, codeLabel: 'Add the MCP server',
+    docs: 'https://code.claude.com/docs/en/mcp',
+  },
+  {
+    id: 'vscode', name: 'VS Code', detail: 'Copilot', logo: '/vscode.svg',
+    heading: 'Put ./AGENT in your editor.',
+    steps: ['Open the Command Palette and run MCP: Add Server.', 'Choose HTTP, paste the server URL and name the server agent.', 'Start the server, review its tools and use them in agent chat.'],
+    code: JSON.stringify({ servers: { agent: { type: 'http', url: MCP_URL } } }, null, 2), codeLabel: 'Or add to .vscode/mcp.json',
+    docs: 'https://code.visualstudio.com/docs/agent-customization/mcp-servers',
+  },
+  {
+    id: 'other', name: 'Another agent', detail: 'Any MCP client', logo: '',
+    heading: 'Your agent. The same connection.',
+    steps: ['Open your agent’s MCP or connector settings.', 'Add a remote server with Streamable HTTP and paste the server URL.', 'Name it agent, review the connection and load its tools.'],
+    docs: 'https://modelcontextprotocol.io/docs/learn/architecture',
+  },
+]
+
+const prompts = [
+  { label: 'WALLETS', text: 'Create my Zcash and EVM wallets.' },
+  { label: 'ZCASH', text: 'Move 100 USDC on Base into my shielded Zcash wallet.' },
+  { label: 'EXECUTION', text: 'Swap 0.1 ETH for USDC on Ethereum.' },
+  { label: 'NEAR', text: 'Send 2 NEAR to my saved recipient.' },
+  { label: 'BALANCES', text: 'Show my ZEC, NEAR and EVM balances.' },
+  { label: 'RECEIPTS', text: 'Show the status of my last transaction.' },
+]
+
+const faqs = [
+  { question: 'What does ./AGENT do?', answer: './AGENT is an execution layer for your agent. It turns your instructions into wallet actions, transfers and swaps across Zcash, EVM networks and NEAR, and brings the transaction result back into your conversation.' },
+  { question: 'How do I connect?', answer: 'Choose your agent above and add the hosted MCP server. Your agent discovers ./AGENT’s tools through that connection. Setup and connection management stay in your MCP client.' },
+  { question: 'Which wallets do I get?', answer: 'A shielded Zcash wallet and a multichain EVM wallet, with native NEAR account access through the same MCP connection. Ethereum, Base, Arbitrum, Optimism, BNB Chain, Arc and Robinhood Chain sit alongside Zcash and NEAR in one conversation.' },
+  { question: 'Who controls my funds?', answer: 'You do. The wallets are non-custodial: you control the keys and authorize transactions. Your agent prepares and executes your instructions through ./AGENT without needing your recovery phrase.' },
+  { question: 'What stays private?', answer: 'Shielded Zcash transactions protect the sender, recipient and amount within the shielded pool. Activity on EVM networks and NEAR remains public. Moving between chains does not make the public side of a transaction private.' },
+  { question: 'Do I need to run a server?', answer: 'No. Add the hosted URL to a client that supports remote MCP over Streamable HTTP. ./AGENT provides the tools; you keep using the agent you already know.' },
+]
+
+function ArrowIcon() {
+  return <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+}
+
+function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  async function copy() {
+    clearTimeout(timer.current)
+    try {
+      await navigator.clipboard.writeText(value)
+      setState('copied')
+    } catch {
+      setState('failed')
+    }
+    timer.current = setTimeout(() => setState('idle'), 2600)
+  }
+  return <button type="button" className="tk-copy" onClick={copy} aria-label={state === 'copied' ? 'Copied to clipboard' : label}>
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">{state === 'copied'
+      ? <path d="m4 10 4 4 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      : <><rect x="7" y="7" width="9" height="10" rx="2" stroke="currentColor" strokeWidth="1.3" /><path d="M12 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h2" stroke="currentColor" strokeWidth="1.3" /></>}</svg>
+    <span aria-live="polite">{state === 'copied' ? 'Copied' : state === 'failed' ? 'Select & copy manually' : label}</span>
+  </button>
+}
 
 export default function ToolkitPage() {
-  return (
-    <>
-      <Nav />
+  const [selected, setSelected] = useState('claude')
+  const client = clients.find(({ id }) => id === selected)!
 
+  return <>
+    <Nav />
+    <main className="toolkit-page">
+      <header className="tk-heading">
+        <div><h1>Your agent.<br /><span>Connected.</span></h1></div>
+        <div className="tk-intro"><p>Wallets. Transfers. Onchain execution.<br />One MCP connection, inside your agent.</p><div className="tk-networks"><span>Zcash</span><span>EVM</span><span>NEAR</span></div></div>
+      </header>
 
-      {/* Connection Guide */}
-      <Terminal />
-
-      {/* Example Usage */}
-      <div className="mcp-setup">
-        <h3>Talk to Your Agent — Examples</h3>
-        <p style={{ fontSize: '11px', color: '#555', lineHeight: '1.8', marginBottom: '20px' }}>
-          After connecting, your agent discovers all 102 tools automatically. Just speak naturally:
-        </p>
-        <div className="usage-examples">
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Create a wallet called Trading Bot"</span>
+      <section id="connect" className="tk-connect" aria-labelledby="tk-connect-title">
+        <div className="tk-connect-top"><h2 id="tk-connect-title">Connect your agent</h2></div>
+        <div className="tk-connect-grid">
+          <div className="tk-client-picker" role="group" aria-label="Choose your agent">
+            {clients.map(item => <button type="button" key={item.id} aria-pressed={selected === item.id} aria-controls="tk-client-guide" onClick={() => setSelected(item.id)}>
+              <span className="tk-client-icon">{item.logo ? <img src={item.logo} alt="" /> : <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>}</span>
+              <span className="tk-client-name">{item.name}<small>{item.detail}</small></span><ArrowIcon />
+            </button>)}
           </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Swap 500 USDC.e for wETH — show me the fees first"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Open a 5x long on ETH-PERP with 0.5 ETH"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Stake 10 ETH via Lido and wrap to wstETH"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Find the best yield opportunities for USDC above 5% APY"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"What's the TVL of Aave on DefiLlama?"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Set up a DCA — buy $50 of wETH every 6 hours"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Bridge 100 USDC to Arbitrum via Relay"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Show me trending Polymarket predictions"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Find the best pool for PEPE/USDC on Base"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Remember that I prefer low-risk strategies with max 5x leverage"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"What trades did I do last week?"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Send me a Telegram alert when ETH drops below $2000"</span>
-          </div>
-          <div className="usage-example">
-            <span className="usage-prompt">→</span>
-            <span className="usage-text">"Supply 1000 USDC to Aave on Arbitrum and enable as collateral"</span>
+          <div id="tk-client-guide" className="tk-guide" key={client.id}>
+            <h3>{client.heading}</h3>
+            <ol className="tk-steps">{client.steps.map((step, index) => <li key={step}><span>{String(index + 1).padStart(2, '0')}</span><p>{step}</p></li>)}</ol>
+            <div className="tk-endpoint">
+              <div className="tk-endpoint-label"><span>Server URL</span><span>Streamable HTTP</span></div>
+              <div className="tk-url-row"><input aria-label="MCP server URL" readOnly value={MCP_URL} onFocus={event => event.target.select()} spellCheck={false} /><CopyButton value={MCP_URL} label="Copy URL" /></div>
+            </div>
+            {'code' in client && <div className="tk-config"><div><span>{client.codeLabel}</span><CopyButton value={client.code!} label="Copy setup" /></div><pre><code>{client.code}</code></pre></div>}
+            <div className="tk-guide-actions">
+              {'href' in client && <a className="tk-primary-action" href={client.href} target={client.id === 'claude' ? '_blank' : undefined} rel="noopener noreferrer">{client.action}<ArrowIcon /></a>}
+              <a className="tk-guide-link" href={client.docs} target="_blank" rel="noopener noreferrer">{client.name === 'Another agent' ? 'About MCP' : `${client.name} setup guide`}<span aria-hidden="true">↗</span></a>
+            </div>
           </div>
         </div>
-      </div>
+        <div className="tk-connect-bottom"><span>Your agent is the interface.</span><span>Your keys stay yours.</span></div>
+      </section>
 
-      {/* FAQ */}
-      <div className="faq">
-        <h3>FAQ</h3>
-        <Accordion>
-          <AccordionItem num="01" title="What is ./AGNT?">
-            <div className="narrative-inner"><p>The most comprehensive <mark>DeFi terminal for AI agents</mark>. 102+ MCP tools covering wallets, spot trading, Smart Routing on multiple DEXes, perpetual futures, lending, yield farming, liquid staking, restaking, cross-chain swaps, bridges, market intelligence, prediction markets, analytics platforms, automated strategies, safety controls, DAO governance, persistent agent memory, Telegram notifications, and agent-to-agent coordination via A2A — all from <mark>a single URL</mark>.</p></div>
-          </AccordionItem>
-          <AccordionItem num="02" title="How do I connect my agent?">
-            <div className="narrative-inner"><p>Create an API key or Claude connector URL from your AGNT dashboard, then add the hosted MCP endpoint to your agent config. Claude-style clients can use the connector URL directly; clients with header support should send <em>x-agnt-api-key</em>.</p></div>
-          </AccordionItem>
-          <AccordionItem num="03" title="Do I need to install anything?">
-            <div className="narrative-inner"><p><mark>No</mark>. We host the MCP server. Just add the URL and your agent connects instantly. If you prefer self-hosting, you can clone the repo and run <mark>npx @agnt/mcp</mark> locally.</p></div>
-          </AccordionItem>
-          <AccordionItem num="04" title="What agents are supported?">
-            <div className="narrative-inner"><p><em>Claude Desktop</em>, <em>Cursor</em>, <em>Windsurf</em>, <em>Amp</em>, <em>Antigravity</em>, and <mark>any MCP-compatible agent</mark>. If your agent supports the Model Context Protocol, it works with ./AGNT — all 100+ tools register automatically.</p></div>
-          </AccordionItem>
-          <AccordionItem num="05" title="What protocols are supported?">
-            <div className="narrative-inner"><p>Tempo DEX, Hyperliquid, Aave V3, Lido, EigenLayer, Ethena, Morpho, Pendle, Ondo Finance, Uniswap V3, PancakeSwap, Jumper/LiFi, Relay, deBridge, Stargate/LayerZero, DefiLlama, Dune Analytics, Polymarket, and more. Check our <Link to="/docs">documentation</Link> for the full list.</p></div>
-          </AccordionItem>
-          <AccordionItem num="06" title="Are my keys safe?">
-            <div className="narrative-inner"><p>Wallet keys are generated and encrypted with <mark>AES-256-GCM</mark> on the machine running your MCP server — whether that's your laptop or your own VPS. Keys <mark>never leave that machine</mark> and are never transmitted over the network. Every transaction is signed server-side by your agent's wallet.</p></div>
-          </AccordionItem>
-          <AccordionItem num="07" title="How does payment work?">
-            <div className="narrative-inner"><p>Create an account, then use the Plans page to choose the access level you need. API keys and Claude connector URLs are generated from your dashboard and stay tied to your account.</p></div>
-          </AccordionItem>
-          <AccordionItem num="08" title="What is A2A?">
-            <div className="narrative-inner"><p>A2A (Agent-to-Agent) is Google's open standard for <mark>agent coordination</mark>. ./AGNT publishes an Agent Card at <em>/.well-known/agent.json</em> so other agents can discover its DeFi capabilities and submit tasks. Combined with MCP (agent↔tools) and MPP (agent↔payments), ./AGNT is the first DeFi toolkit with the <mark>complete agentic protocol stack</mark>.</p></div>
-          </AccordionItem>
-          <AccordionItem num="09" title="Does my agent remember things?">
-            <div className="narrative-inner"><p>Yes. The built-in <mark>Agent Memory</mark> tool stores facts, trade history, and preferences in an encrypted file (<mark>AES-256-GCM</mark>). Your agent can recall past trades, remember risk preferences, and learn from previous performance — all persisted across sessions.</p></div>
-          </AccordionItem>
-        </Accordion>
-      </div>
+      <section className="tk-prompts" aria-labelledby="tk-prompts-title">
+        <div className="tk-section-heading"><div><h2>Say it. Execute it.</h2></div><p>Take a prompt into your agent.<br />Keep the whole action in one conversation.</p></div>
+        <div className="tk-prompt-grid">{prompts.map(prompt => <article key={prompt.label}><span className="tk-prompt-label">{prompt.label}</span><p>{prompt.text}</p><CopyButton value={prompt.text} label="Copy prompt" /></article>)}</div>
+      </section>
 
-      <Footer />
-    </>
-  )
+      <section className="tk-faq" aria-labelledby="tk-faq-title">
+        <div className="tk-section-heading"><div><h2 id="tk-faq-title">Before you begin.</h2></div><Link to="/docs" className="tk-guide-link">Read the docs<span aria-hidden="true">↗</span></Link></div>
+        <Accordion>{faqs.map((faq, index) => <AccordionItem key={faq.question} num={String(index + 1).padStart(3, '0')} title={faq.question}><p>{faq.answer}</p></AccordionItem>)}</Accordion>
+      </section>
+    </main>
+    <Footer showInvitation={false} />
+  </>
 }

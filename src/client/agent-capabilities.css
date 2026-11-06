@@ -1,0 +1,33 @@
+.agent-capabilities { color: #e8e8e5; }
+.capabilities-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.capabilities-zcash { flex-shrink: 0; width: 159px; height: 30px; margin-bottom: 8px; }
+.capabilities-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.capability-card { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid #303130; border-radius: 16px; background: #080808; box-shadow: inset 0 1px 0 #ffffff08, 0 12px 42px #00000024; transition: border-color .35s; }
+.capability-card:hover { border-color: #4b4d49; }
+.capability-copy { padding: 32px 32px 0; }
+.capability-copy h3 { margin: 0 0 12px; color: #e8e8e5; font: 500 24px/1.25 var(--font-sans); letter-spacing: -.025em; }
+.capability-copy p { max-width: 460px; min-height: 53px; margin: 0; color: #a6a6a6; font: 400 16px/1.65 var(--font-sans); }
+.capability-stage { width: 100%; aspect-ratio: 1.48; margin-top: auto; position: relative; }
+.capability-render, .capability-canvas { position: absolute; inset: 0; }
+.capability-canvas { opacity: 0; transition: opacity .65s; }
+.capability-canvas canvas { display: block; width: 100%; height: 100%; }
+.capability-render.is-ready .capability-canvas { opacity: 1; }
+.capability-fallback, .capability-placeholder { display: block; width: 100%; height: 100%; object-fit: contain; }
+.capability-fallback { opacity: 1; transition: opacity .65s; }
+.capability-render.is-ready .capability-fallback { opacity: 0; }
+@media (max-width: 1000px) {
+  .capabilities-grid { gap: 18px; }
+  .capability-copy { padding: 26px 26px 0; }
+  .capability-copy h3 { font-size: 24px; }
+  .capability-copy p { font-size: 15px; }
+}
+@media (max-width: 700px) {
+  .capabilities-heading { align-items: flex-start; flex-direction: column; gap: 24px; }
+  .capabilities-zcash { width: 128px; height: 24px; margin-bottom: 0; }
+  .capabilities-grid { grid-template-columns: 1fr; gap: 18px; }
+  .capability-copy { padding: 24px 24px 0; }
+  .capability-copy h3 { font-size: 22px; }
+  .capability-copy p { min-height: 0; }
+  .capability-stage { aspect-ratio: 1.24; }
+}
+@media (prefers-reduced-motion: reduce) { .capability-card, .capability-canvas, .capability-fallback { transition: none; } }

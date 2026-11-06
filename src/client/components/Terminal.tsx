@@ -25,19 +25,19 @@ const MCP_HTTP_WITH_CONNECTOR = `${MCP_HTTP}?agnt_connector_token=<your connecto
 
 /* ─── One-Click Install Deep Links ─── */
 const cursorConfig = btoa(JSON.stringify({ url: MCP_SSE_WITH_CONNECTOR }))
-const CURSOR_DEEP_LINK = `cursor://anysphere.cursor-deeplink/mcp/install?name=agnt&config=${cursorConfig}`
+const CURSOR_DEEP_LINK = `cursor://anysphere.cursor-deeplink/mcp/install?name=agent&config=${cursorConfig}`
 
-const vscodeConfig = encodeURIComponent(JSON.stringify({ name: 'agnt', url: MCP_SSE_WITH_CONNECTOR }))
+const vscodeConfig = encodeURIComponent(JSON.stringify({ name: 'agent', url: MCP_SSE_WITH_CONNECTOR }))
 const VSCODE_DEEP_LINK = `vscode://mcp/install?${vscodeConfig}`
 
 /* ─── Reusable snippets ─── */
-const JSON_CONFIG = JSON.stringify({ mcpServers: { agnt: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)
-const VSCODE_JSON = JSON.stringify({ servers: { agnt: { type: 'sse', url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)
-const AG_JSON = JSON.stringify({ mcpServers: { agnt: { url: MCP_HTTP, headers: { 'x-agnt-api-key': '<your API key>' } } } }, null, 2)
-const OPENCODE_JSON = JSON.stringify({ mcp: { agnt: { type: 'remote', url: MCP_SSE_WITH_CONNECTOR, enabled: true } } }, null, 2)
-const GEMINI_JSON = JSON.stringify({ mcpServers: { agnt: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)
+const JSON_CONFIG = JSON.stringify({ mcpServers: { agent: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)
+const VSCODE_JSON = JSON.stringify({ servers: { agent: { type: 'sse', url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)
+const AG_JSON = JSON.stringify({ mcpServers: { agent: { url: MCP_HTTP, headers: { 'x-agnt-api-key': '<your API key>' } } } }, null, 2)
+const OPENCODE_JSON = JSON.stringify({ mcp: { agent: { type: 'remote', url: MCP_SSE_WITH_CONNECTOR, enabled: true } } }, null, 2)
+const GEMINI_JSON = JSON.stringify({ mcpServers: { agent: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)
 const AMP_CONFIG = `"amp.mcpServers": {
-  "agnt": {
+  "agent": {
     "url": "${MCP_SSE_WITH_CONNECTOR}"
   }
 }`
@@ -55,19 +55,19 @@ const AGENT_TABS: TabData[] = [
     blocks: [
       comment('─── Option 1: Claude App / Web ───'),
       comment('Go to Settings → Connectors → Add custom connector'),
-      comment('Name: agnt'),
-      comment('Create a Claude connector URL in your AGNT dashboard, then paste it here:'),
+      comment('Name: agent'),
+      comment('Create a Claude connector URL in your AGENT dashboard, then paste it here:'),
       cmd(MCP_HTTP_WITH_CONNECTOR),
       blank(),
       comment('Legacy SSE URL if your Claude client asks for SSE:'),
       cmd(MCP_SSE_WITH_CONNECTOR),
       blank(),
       comment('─── Option 2: Claude Code (CLI) ───'),
-      cmd(`claude mcp add agnt --transport sse "${MCP_SSE_WITH_CONNECTOR}"`),
+      cmd(`claude mcp add agent --transport sse "${MCP_SSE_WITH_CONNECTOR}"`),
       blank(),
       comment('─── Start Using ───'),
       comment('"Create a wallet called Trading Bot"'),
-      comment('"Swap 100 USDC.e for wETH — show me the fees"'),
+      comment('"Quote 100 USDC to WETH on Base — show me the fees"'),
     ],
   },
   {
@@ -76,11 +76,11 @@ const AGENT_TABS: TabData[] = [
       comment('─── Add to Codex ───'),
       comment('1. Press Ctrl+Shift+P'),
       comment('2. Search "MCP" → Click "Add Server"'),
-      comment('3. Name: agnt'),
+      comment('3. Name: agent'),
       comment('4. Change type to "Streamable HTTP"'),
       comment('5. Paste URL:'),
       cmd(MCP_HTTP),
-      comment('6. Add header x-agnt-api-key with your AGNT API key'),
+      comment('6. Add header x-agnt-api-key with your AGENT API key'),
       comment('7. Click Save'),
       blank(),
       comment('─── Start Using ───'),
@@ -112,7 +112,7 @@ const AGENT_TABS: TabData[] = [
       comment('3. Select "HTTP" (HTTP or Server-Sent Events)'),
       comment('4. Enter URL:'),
       cmd(MCP_SSE_WITH_CONNECTOR),
-      comment('5. Enter name: agnt'),
+      comment('5. Enter name: agent'),
       comment('6. Choose "Global"'),
       blank(),
       comment('─── Or create .vscode/mcp.json: ───'),
@@ -126,7 +126,7 @@ const AGENT_TABS: TabData[] = [
       cmd('opencode mcp add'),
       blank(),
       comment('Follow the prompts:'),
-      comment('  Name: agnt'),
+      comment('  Name: agent'),
       comment('  Type: Remote'),
       comment('  URL:'),
       cmd(MCP_SSE_WITH_CONNECTOR),
@@ -178,7 +178,7 @@ const AGENT_TABS: TabData[] = [
     id: 'amp', label: 'Amp', color: '#FF6B35', logo: '/amp-color.svg',
     blocks: [
       comment('─── Option 1: CLI (Recommended) ───'),
-      cmd(`amp mcp add agnt "${MCP_SSE_WITH_CONNECTOR}"`),
+      cmd(`amp mcp add agent "${MCP_SSE_WITH_CONNECTOR}"`),
       blank(),
       comment('─── Option 2: Config File ───'),
       comment('Add to your Amp configuration:'),
@@ -190,10 +190,10 @@ const AGENT_TABS: TabData[] = [
     blocks: [
       comment('─── Add to OpenClaw ───'),
       comment('Edit ~/.openclaw/openclaw.json and add:'),
-      code(JSON.stringify({ mcpServers: { agnt: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)),
+      code(JSON.stringify({ mcpServers: { agent: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)),
       blank(),
       comment('Or if you have an existing config, add under mcpServers:'),
-      code(`"agnt": {\n  "url": "${MCP_SSE_WITH_CONNECTOR}"\n}`),
+      code(`"agent": {\n  "url": "${MCP_SSE_WITH_CONNECTOR}"\n}`),
       blank(),
       comment('Restart your OpenClaw runtime to connect'),
     ],
@@ -203,10 +203,10 @@ const AGENT_TABS: TabData[] = [
     blocks: [
       comment('─── Add to Hermes Agent ───'),
       comment('Edit ~/.hermes/.env or hermes config and add:'),
-      code(JSON.stringify({ mcpServers: { agnt: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)),
+      code(JSON.stringify({ mcpServers: { agent: { url: MCP_SSE_WITH_CONNECTOR } } }, null, 2)),
       blank(),
       comment('Or add via Hermes plugin CLI:'),
-      cmd('hermes plugins add agnt --mcp-url "' + MCP_SSE_WITH_CONNECTOR + '"'),
+      cmd('hermes plugins add agent --mcp-url "' + MCP_SSE_WITH_CONNECTOR + '"'),
       blank(),
       comment('Verify:'),
       cmd('hermes plugins list'),
@@ -216,14 +216,14 @@ const AGENT_TABS: TabData[] = [
     id: 'kimi', label: 'Kimi CLI', color: '#6366F1', logo: '/kimi-for-terminal.svg',
     blocks: [
       comment('─── Option 1: CLI (Recommended) ───'),
-      cmd(`kimi mcp add --transport http agnt "${MCP_HTTP_WITH_CONNECTOR}"`),
+      cmd(`kimi mcp add --transport http agent "${MCP_HTTP_WITH_CONNECTOR}"`),
       blank(),
       comment('Verify:'),
       cmd('kimi mcp list'),
       blank(),
       comment('─── Option 2: Config File ───'),
       comment('Edit ~/.kimi/mcp.json and add:'),
-      code(JSON.stringify({ mcpServers: { agnt: { url: MCP_HTTP_WITH_CONNECTOR } } }, null, 2)),
+      code(JSON.stringify({ mcpServers: { agent: { url: MCP_HTTP_WITH_CONNECTOR } } }, null, 2)),
       blank(),
       comment('Inside Kimi CLI, check with:'),
       cmd('/mcp'),
@@ -237,7 +237,7 @@ const AGENT_TABS: TabData[] = [
       comment('2. Click "MCP"'),
       comment('3. Click "Manage MCP"'),
       comment('4. Click "+ Custom"'),
-      comment('5. Name: agnt'),
+      comment('5. Name: agent'),
       comment('6. Paste URL:'),
       cmd(MCP_SSE_WITH_CONNECTOR),
       comment('7. Click Confirm'),
@@ -253,7 +253,7 @@ const AGENT_TABS: TabData[] = [
       comment('─── Self-Host Your Own MCP Server ───'),
       blank(),
       comment('1. Clone the repository'),
-      cmd('git clone https://github.com/user/agnt.git && cd agnt'),
+      cmd('git clone https://github.com/user/agnt.git agent && cd agent'),
       blank(),
       comment('2. Install dependencies'),
       cmd('npm install'),
@@ -267,7 +267,7 @@ const AGENT_TABS: TabData[] = [
       blank(),
       comment('Server runs at http://localhost:3001/sse'),
       comment('Point your agent config to this local URL instead:'),
-      code(JSON.stringify({ mcpServers: { agnt: { url: 'http://localhost:3001/sse' } } }, null, 2)),
+      code(JSON.stringify({ mcpServers: { agent: { url: 'http://localhost:3001/sse' } } }, null, 2)),
       blank(),
       comment('Your keys never leave your machine.'),
     ],
@@ -278,7 +278,7 @@ const AGENT_TABS: TabData[] = [
       comment('─── Any MCP-Compatible Agent ───'),
       blank(),
       comment('CLI-based agents:'),
-      cmd(`<agent> mcp add agnt --transport sse "${MCP_SSE_WITH_CONNECTOR}"`),
+      cmd(`<agent> mcp add agent --transport sse "${MCP_SSE_WITH_CONNECTOR}"`),
       blank(),
       comment('Config-based agents — add to your MCP config:'),
       code(JSON_CONFIG),
@@ -381,7 +381,7 @@ export default function Terminal() {
     <div className="agent-terminal">
       <div className="agent-terminal-header">
         <h3>Connect Your Agent</h3>
-        <p>Create an AGNT account, generate an API key or Claude connector URL, then add the hosted MCP server to your agent.</p>
+        <p>Create an AGENT account, generate an API key or Claude connector URL, then add the hosted MCP server to your agent.</p>
       </div>
 
       {/* ── Capsule tab strip ── */}

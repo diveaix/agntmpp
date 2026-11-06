@@ -1,10 +1,11 @@
 /**
- * ./AGNT Protocol — Lending & Yield Tools
+ * ./AGENT Protocol — Lending & Yield Tools
  * Morpho (optimized lending), Pendle (yield tokenization), Ondo Finance (RWA yield).
  * All write actions execute real on-chain transactions via tx-executor.
  */
 
 import type { ToolModule } from './index.js'
+import { hasRemovedIntegration, isRemovedIntegration } from './integration-policy.js'
 import { getActiveWallet, getOrCreateWallet } from '../wallet.js'
 import { parseUnits } from 'viem'
 import { callContract, ensureApproval, formatTxResult, getBalance } from '../tx-executor.js'
@@ -96,6 +97,7 @@ const TOOLS = [
 // ─── Handlers ────────────────────────────────────────────
 
 async function handle(name: string, args: Record<string, unknown>) {
+  if (TOOLS.some(tool => tool.name === name) && isRemovedIntegration(args.chain)) return err('This chain is not supported.')
   if (name === 'morpho') {
     switch (args.action) {
       case 'supply': {
@@ -214,13 +216,14 @@ async function handle(name: string, args: Record<string, unknown>) {
         const sortBy = sortByArg === 'tvl' ? 'tvl:-1' : sortByArg === 'apy' ? 'impliedApy:-1' : 'expiry:1'
 
         try {
-          const chainId = chain === 'arbitrum' ? '42161' : chain === 'base' ? '8453' : '1'
+          const chainId = ({ ethereum: '1', arbitrum: '42161', base: '8453' } as Record<string, string>)[chain]
+          if (!chainId) return err('Unsupported chain.')
           const data = await fetchJson(`https://api-v2.pendle.finance/core/v2/markets/all?chainId=${chainId}&order_by=${sortBy}&limit=15`) as {
             results: { address: string; name: string; impliedApy: number; tvl: { usd: number }; expiry: string }[]
             total: number
           }
 
-          const markets = data.results || []
+          const markets = (data.results || []).filter(market => !hasRemovedIntegration(market))
           if (!markets.length) return text(`No active Pendle markets on ${chain}.`)
 
           const lines: string[] = [`📊 Pendle Markets — ${chain}\n`]

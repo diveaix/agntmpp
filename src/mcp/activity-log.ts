@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { dirname, isAbsolute, resolve } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { isAbsolute, resolve } from 'path'
 import { randomUUID } from 'crypto'
 import { decrypt, encrypt, getPassphrase } from './crypto.js'
 import type { AuthContext } from './access-types.js'
 import type { ToolResult } from './tools/index.js'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 
 const DEFAULT_PATH = '.agnt/activity.enc'
 const MAX_ACTIVITY_ENTRIES = 1000
@@ -48,19 +49,18 @@ function loadStore(customPath?: string): ActivityStore {
     const json = raw.trim().startsWith('{') ? raw : decrypt(raw, getPassphrase())
     const parsed = JSON.parse(json) as Partial<ActivityStore>
     return { entries: Array.isArray(parsed.entries) ? parsed.entries : [] }
-  } catch {
+  } catch (error) {
+    handleStoreReadFailure(`Activity log (${fp})`, error)
     return emptyStore()
   }
 }
 
 function saveStore(store: ActivityStore, customPath?: string) {
   const fp = resolvePath(customPath)
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const sorted = [...store.entries]
     .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
     .slice(0, MAX_ACTIVITY_ENTRIES)
-  writeFileSync(fp, encrypt(JSON.stringify({ entries: sorted }), getPassphrase()), 'utf-8')
+  writePrivateFileAtomicSync(fp, encrypt(JSON.stringify({ entries: sorted }), getPassphrase()))
 }
 
 function asString(value: unknown): string | undefined {
@@ -78,24 +78,17 @@ function titleFromTool(tool: string, args: Record<string, unknown>): string {
   const amount = asNumber(args.amount)
   const tokenIn = asString(args.tokenIn) || asString(args.asset) || asString(args.token)
   const tokenOut = asString(args.tokenOut) || asString(args.toToken)
-  const market = asString(args.market)
 
-  if (['tempo_swap', 'uniswap', 'pancakeswap'].includes(tool)) {
+  if (['uniswap', 'pancakeswap'].includes(tool)) {
     return `Swap ${amount ?? ''} ${tokenIn ?? 'token'} to ${tokenOut ?? 'token'}`.replace(/\s+/g, ' ').trim()
   }
   if (tool === 'smart_swap') {
     return `Swap ${amount ?? ''} into ${asString(args.query) || tokenOut || 'token'}`.replace(/\s+/g, ' ').trim()
   }
-  if (['tempo_bridge', 'relay', 'debridge', 'jumper'].includes(tool)) {
+  if (['relay', 'jumper'].includes(tool)) {
     const from = asString(args.fromChain) || asString(args.source) || 'source'
     const to = asString(args.toChain) || 'destination'
     return `Bridge ${amount ?? ''} ${tokenIn ?? asString(args.token) ?? 'token'} from ${from} to ${to}`.replace(/\s+/g, ' ').trim()
-  }
-  if (tool === 'hyperliquid') {
-    return `${action || 'Hyperliquid'}${market ? ` ${market}` : ''}`.replace(/\b\w/g, (m) => m.toUpperCase())
-  }
-  if (tool === 'polymarket') {
-    return `${action || 'Polymarket'} ${asString(args.outcome) || ''} ${asString(args.marketUrl) || asString(args.marketId) || ''}`.replace(/\s+/g, ' ').trim()
   }
   if (tool === 'payment') {
     return `Send ${amount ?? ''} ${asString(args.token) || 'token'}`.replace(/\s+/g, ' ').trim()
@@ -154,4 +147,3 @@ export function listActivityForUser(userId: string, options?: { includeLocalUnow
     .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
     .slice(0, limit)
 }
-

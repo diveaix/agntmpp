@@ -1,11 +1,11 @@
 import type { AuthContext } from '../access-types.js'
 import {
   createApiKey,
-  getCurrentSubscription,
   loadAccessStore,
   revokeApiKey,
 } from '../access-store.js'
 import type { ToolModule } from './index.js'
+import { describePassAccess } from '../sale/runtime.js'
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
 const err = (e: string) => ({ content: [{ type: 'text' as const, text: `Error: ${e}` }], isError: true })
@@ -13,7 +13,7 @@ const err = (e: string) => ({ content: [{ type: 'text' as const, text: `Error: $
 const TOOLS = [
   {
     name: 'account',
-    description: 'API key management for AGNT users. API keys and connector tokens keep wallets tied to the account across sessions.',
+    description: 'API key management for AGENT users. API keys and connector tokens keep wallets tied to the account across sessions.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -30,19 +30,13 @@ const TOOLS = [
   },
 ]
 
-function titlePlan(plan: string): string {
-  if (plan === 'max') return 'Ultra'
-  if (plan === 'pro') return 'Pro'
-  return 'Free'
-}
-
 function formatKeyLine(key: { id: string; prefix: string; label: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null }): string {
   const status = key.revokedAt ? 'revoked' : 'active'
   return `- ${key.label} (${key.id}) ${key.prefix}... ${status}, created ${key.createdAt.slice(0, 10)}${key.lastUsedAt ? `, last used ${key.lastUsedAt.slice(0, 10)}` : ''}`
 }
 
 function requireAuth(auth?: AuthContext): AuthContext | { error: string } {
-  if (!auth) return { error: 'API key or connector token required for account management. Create access from the AGNT dashboard.' }
+  if (!auth) return { error: 'API key or connector token required for account management. Create access from the AGENT dashboard.' }
   return auth
 }
 
@@ -51,37 +45,28 @@ async function handle(name: string, args: Record<string, unknown>, auth?: AuthCo
 
   switch (args.action) {
     case 'register':
-      return err('Use the AGNT dashboard to create an account, then generate API keys and connector URLs from there.')
+      return err('Use the AGENT dashboard to create an account, then generate API keys and connector URLs from there.')
 
     case 'me': {
       const checked = requireAuth(auth)
       if ('error' in checked) return err(checked.error)
       const store = loadAccessStore()
       const user = store.users.find((candidate) => candidate.id === checked.userId)
-      const subscription = getCurrentSubscription(checked.userId)
       const keys = store.apiKeys.filter((key) => key.userId === checked.userId)
+      const passes = await describePassAccess(checked.userId)
 
       return text([
-        'AGNT account',
+        'AGENT account',
         '',
         `User ID: ${checked.userId}`,
         user?.email ? `Email: ${user.email}` : undefined,
         user?.walletAddress ? `Wallet: ${user.walletAddress}` : undefined,
-        `Current plan: ${titlePlan(checked.plan)}`,
-        `Subscription status: ${checked.subscriptionStatus}`,
-        subscription?.currentPeriodEnd ? `Current period ends: ${subscription.currentPeriodEnd}` : undefined,
-        '',
-        'Entitlements:',
-        `- Data automations: ${checked.entitlement.dataAutomationSlots}`,
-        `- Custom Twitter sources: ${checked.entitlement.customSourceSlots}`,
-        `- Auto-execute: ${checked.entitlement.autoExecuteAllowed ? 'yes' : 'no'}`,
-        `- Priority queue: ${checked.entitlement.priorityQueue ? 'yes' : 'no'}`,
+        'Access: account authenticated',
+        `Collectible access (live snapshot, not spending authorization): ${JSON.stringify(passes)}`,
         '',
         'API keys:',
         ...(keys.length ? keys.map(formatKeyLine) : ['- none']),
         '',
-        'Upgrade path:',
-        'Open the Plans page on the AGNT website and complete checkout.',
       ].filter((line): line is string => Boolean(line)).join('\n'))
     }
 

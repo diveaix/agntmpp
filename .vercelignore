@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.agnt/
+wallet-recovery-output/
+*.enc
+*.log
+.git/
+.github/
+.npm-cache*/
+node_modules/
+dist/
+docs/
+skills/
+AGENTS.md
+src/**/*.test.ts

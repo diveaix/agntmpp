@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Memory Tools v2
+ * ./AGENT Protocol — Memory Tools v2
  * Fast: in-memory indexed search, debounced persistence.
  * New: bulk_forget, search_tag, export.
  */

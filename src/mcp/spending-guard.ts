@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Spending Guard
+ * ./AGENT Protocol — Spending Guard
  *
  * Enforces per-wallet spending limits:
  *   • Daily cap — max USD value the wallet can spend in a rolling 24h window
@@ -9,8 +9,9 @@
  * Spend ledger: .agnt/spend-ledger.json (rolling 24h transaction log)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { dirname, resolve, isAbsolute } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { resolve, isAbsolute } from 'path'
+import { handleStoreReadFailure, writePrivateFileAtomicSync } from './persistence.js'
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -45,35 +46,34 @@ function resolvePath(p: string): string {
   return isAbsolute(p) ? p : resolve(process.cwd(), p)
 }
 
-function ensureDir(fp: string) {
-  const dir = dirname(fp)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-}
-
 // ─── Persistence ─────────────────────────────────────────
 
 function loadLimits(): LimitStore {
   const fp = resolvePath(LIMITS_PATH)
   if (!existsSync(fp)) return { limits: [] }
-  try { return JSON.parse(readFileSync(fp, 'utf-8')) as LimitStore } catch { return { limits: [] } }
+  try { return JSON.parse(readFileSync(fp, 'utf-8')) as LimitStore } catch (error) {
+    handleStoreReadFailure(`Spending limits (${fp})`, error)
+    return { limits: [] }
+  }
 }
 
 function saveLimits(store: LimitStore) {
   const fp = resolvePath(LIMITS_PATH)
-  ensureDir(fp)
-  writeFileSync(fp, JSON.stringify(store, null, 2), 'utf-8')
+  writePrivateFileAtomicSync(fp, JSON.stringify(store, null, 2))
 }
 
 function loadLedger(): LedgerStore {
   const fp = resolvePath(LEDGER_PATH)
   if (!existsSync(fp)) return { entries: [] }
-  try { return JSON.parse(readFileSync(fp, 'utf-8')) as LedgerStore } catch { return { entries: [] } }
+  try { return JSON.parse(readFileSync(fp, 'utf-8')) as LedgerStore } catch (error) {
+    handleStoreReadFailure(`Spend ledger (${fp})`, error)
+    return { entries: [] }
+  }
 }
 
 function saveLedger(store: LedgerStore) {
   const fp = resolvePath(LEDGER_PATH)
-  ensureDir(fp)
-  writeFileSync(fp, JSON.stringify(store, null, 2), 'utf-8')
+  writePrivateFileAtomicSync(fp, JSON.stringify(store, null, 2))
 }
 
 // ─── Core API ────────────────────────────────────────────

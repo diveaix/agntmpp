@@ -1,34 +1,30 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, writeFileSync } from 'node:fs'
 import {
   isAutomationStillValid,
   parseAutomationValidity,
   normalizeAutomationMode,
-  type EventTriggerAutomationParams,
-  type HyperliquidInfoMonitorParams,
 } from '../automation-types.js'
 import { addAutomationHistory, createAutomation, loadAutomations, updateAutomationStatusForUser } from '../scheduler.js'
 import { buildTopicRule, prefilterTweet } from '../automation-tags.js'
 import { deriveSourceState } from '../automation-source-manager.js'
 import { MockGrokVerifier, XaiGrokVerifier, normalizeGrokVerificationJson } from '../automation-verifier.js'
 import { buildUniversalEventFromVerification, matchEventAutomations } from '../automation-matcher.js'
-import { evaluateAutomationPolicy } from '../automation-policy.js'
-import { simulateAutomationAction, simulateHyperliquidInfoMonitor } from '../automation-simulators.js'
 import { canCreateDataAutomation, getPlanEntitlement } from '../automation-entitlements.js'
-import automationsModule from './automations.js'
-import { setAutomationReadinessProbeForTests } from './automations.js'
 import { TwitterApiIoClient } from '../twitterapi-client.js'
 import { processIncomingTweet } from '../twitter-ingestion-worker.js'
 import { checkEventAutomationIntake, formatMissingQuestions } from '../automation-intake.js'
 import { compileEventAutomation } from '../fast-event-compiler.js'
 import { EventHotCache } from '../event-hot-cache.js'
 import { buildEventHotCacheFromAutomations } from '../automation-runner.js'
+import { dispatchMatchedEventAutomation } from '../event-action-dispatcher.js'
+import type { AutomationEntry } from '../scheduler.js'
 
 test('normalizes automation execution modes', () => {
   assert.equal(normalizeAutomationMode(undefined), 'notify_only')
-  assert.equal(normalizeAutomationMode('ask_first'), 'ask_first')
-  assert.equal(normalizeAutomationMode('auto_execute'), 'auto_execute')
-  assert.equal(normalizeAutomationMode('bad-value'), 'notify_only')
+  assert.equal(normalizeAutomationMode('emergency_paused'), 'emergency_paused')
+  assert.throws(() => normalizeAutomationMode('ask_first'), /notification/)
 })
 
 test('parses automation validity windows and rejects missing validity', () => {
@@ -51,87 +47,14 @@ test('Grok verifier confirms whether tweet satisfies automation only', async () 
   assert.equal(result.needs_external_search, false)
 })
 
-test('event trigger params support Polymarket and Hyperliquid actions', () => {
-  const polymarket: EventTriggerAutomationParams = {
-    trigger: {
-      topic: 'iran_israel_conflict',
-      eventType: 'military_attack',
-      actor: 'Iran',
-      target: 'Israel',
-      minConfidence: 0.8,
-    },
-    action: {
-      protocol: 'polymarket',
-      marketId: 'iran-israel-market',
-      side: 'YES',
-      maxSpend: 25,
-      maxPrice: 0.65,
-    },
-    policy: { maxDailySpend: 50 },
-    mode: 'auto_execute',
-    validFor: '6h',
-    validUntil: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-  }
-
-  const hyperliquid: EventTriggerAutomationParams = {
-    trigger: {
-      topic: 'middle_east_conflict',
-      eventType: 'military_attack',
-      assetImpact: 'crypto_risk_off',
-      minConfidence: 0.85,
-    },
-    action: {
-      protocol: 'hyperliquid',
-      kind: 'trade',
-      market: 'ETH',
-      side: 'short',
-      amountUsd: 50,
-      leverage: 2,
-      stopLossPercent: 3,
-      takeProfitPercent: 6,
-    },
-    policy: { maxLeverage: 3 },
-    mode: 'ask_first',
-    validFor: '1d',
-    validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-  }
-
-  assert.equal(polymarket.action.protocol, 'polymarket')
-  assert.equal(hyperliquid.action.protocol, 'hyperliquid')
-})
-
-test('hyperliquid information monitor params are read-only capable', () => {
-  const monitor: HyperliquidInfoMonitorParams = {
-    trigger: {
-      protocol: 'hyperliquid',
-      metric: 'funding_rate',
-      market: 'BTC',
-      condition: 'above',
-      threshold: 0.01,
-    },
-    action: {
-      kind: 'notify',
-      message: 'BTC funding is unusually high.',
-    },
-    policy: {},
-    mode: 'notify_only',
-    validFor: '7d',
-    validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-  }
-
-  assert.equal(monitor.trigger.metric, 'funding_rate')
-  assert.equal(monitor.action.kind, 'notify')
-})
-
 test('scheduler persists event trigger automations', () => {
   const path = `./.agnt/test-automations-${Date.now()}.enc`
   const auto = createAutomation({
     type: 'event_trigger',
-    name: 'Iran Israel Polymarket test',
+    name: 'Iran Israel event notification',
     params: {
       trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
-      action: { protocol: 'polymarket', marketId: 'market-1', side: 'YES', maxSpend: 10 },
-      policy: { maxDailySpend: 10 },
+      action: { kind: 'notify' },
       mode: 'notify_only',
       validFor: '1h',
       validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -144,78 +67,6 @@ test('scheduler persists event trigger automations', () => {
   const store = loadAutomations(path)
   assert.equal(store.automations[0].id, auto.id)
   assert.equal(store.automations[0].type, 'event_trigger')
-})
-
-test('resuming a paused DCA restores the next run when executions remain', () => {
-  const previousPath = process.env.AGNT_AUTOMATIONS_PATH
-  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-resume-dca-${Date.now()}.enc`
-  try {
-    const auto = createAutomation({
-      type: 'dca',
-      name: 'Swap pathUSD to USDC.e',
-      userId: 'usr_resume_dca',
-      params: { tokenIn: 'pathUSD', tokenOut: 'USDC.e', amount: 0.1 },
-      intervalMs: 20_000,
-      maxRuns: 4,
-      status: 'active',
-    })
-
-    addAutomationHistory(auto.id, 'run 1', true)
-    addAutomationHistory(auto.id, 'run 2', true)
-    addAutomationHistory(auto.id, 'run 3', true)
-
-    const paused = updateAutomationStatusForUser(auto.id, 'usr_resume_dca', 'paused')
-    assert.equal(paused?.runCount, 3)
-    assert.equal(paused?.nextRun, null)
-
-    const resumed = updateAutomationStatusForUser(auto.id, 'usr_resume_dca', 'active')
-    assert.equal(resumed?.status, 'active')
-    assert.equal(resumed?.runCount, 3)
-    assert.ok(resumed?.nextRun)
-    assert.ok(new Date(resumed.nextRun).getTime() > Date.now())
-  } finally {
-    if (previousPath === undefined) delete process.env.AGNT_AUTOMATIONS_PATH
-    else process.env.AGNT_AUTOMATIONS_PATH = previousPath
-  }
-})
-
-test('skipped automation history does not consume remaining DCA runs', () => {
-  const previousPath = process.env.AGNT_AUTOMATIONS_PATH
-  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-skipped-dca-${Date.now()}.enc`
-  try {
-    const auto = createAutomation({
-      type: 'dca',
-      name: 'Retry-safe DCA',
-      userId: 'usr_skipped_dca',
-      params: { tokenIn: 'pathUSD', tokenOut: 'USDC.e', amount: 0.1 },
-      intervalMs: 20_000,
-      maxRuns: 4,
-      status: 'active',
-    })
-
-    addAutomationHistory(auto.id, 'run 1', true)
-    addAutomationHistory(auto.id, 'run 2', true)
-    addAutomationHistory(auto.id, 'run 3', true)
-    addAutomationHistory(auto.id, 'Skipped: access paused', false, { countRun: false, status: 'paused', nextRun: null })
-
-    const paused = loadAutomations().automations.find((a) => a.id === auto.id)
-    assert.equal(paused?.runCount, 3)
-    assert.equal(paused?.status, 'paused')
-    assert.equal(paused?.nextRun, null)
-
-    const resumed = updateAutomationStatusForUser(auto.id, 'usr_skipped_dca', 'active')
-    assert.equal(resumed?.status, 'active')
-    assert.equal(resumed?.runCount, 3)
-    assert.ok(resumed?.nextRun)
-
-    addAutomationHistory(auto.id, 'run 4', true)
-    const completed = loadAutomations().automations.find((a) => a.id === auto.id)
-    assert.equal(completed?.runCount, 4)
-    assert.equal(completed?.status, 'completed')
-  } finally {
-    if (previousPath === undefined) delete process.env.AGNT_AUTOMATIONS_PATH
-    else process.env.AGNT_AUTOMATIONS_PATH = previousPath
-  }
 })
 
 test('prefilter sends only active topic tweets to Grok', () => {
@@ -250,8 +101,7 @@ test('source manager enables topics only when active automations need them', () 
       name: 'Iran Israel',
       params: {
         trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack' },
-        action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
-        policy: {},
+        action: { kind: 'notify' },
         mode: 'notify_only',
         validFor: '1h',
         validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -316,11 +166,10 @@ test('matcher finds automations whose trigger matches verified event tags', () =
   const matches = matchEventAutomations(event, [{
     id: 'auto1',
     type: 'event_trigger',
-    name: 'Buy YES',
+    name: 'Event notification',
     params: {
       trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
-      action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
-      policy: {},
+      action: { kind: 'notify' },
       mode: 'notify_only',
       validFor: '1h',
       validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -339,84 +188,6 @@ test('matcher finds automations whose trigger matches verified event tags', () =
   assert.equal(matches[0].id, 'auto1')
 })
 
-test('policy blocks auto execution when simulation has blocks or mode is paused', () => {
-  const blocked = evaluateAutomationPolicy(
-    { maxTradeSizeUsd: 10 },
-    'auto_execute',
-    { ok: false, protocol: 'polymarket', summary: 'bad price', warnings: [], blocks: ['price too high'], estimatedCostUsd: 8 },
-  )
-  const paused = evaluateAutomationPolicy(
-    {},
-    'emergency_paused',
-    { ok: true, protocol: 'hyperliquid', summary: 'ok', warnings: [], blocks: [], estimatedCostUsd: 5 },
-  )
-
-  assert.equal(blocked.allowed, false)
-  assert.equal(paused.allowed, false)
-})
-
-test('policy allows ask-first simulations but marks mode clearly', () => {
-  const decision = evaluateAutomationPolicy(
-    { maxTradeSizeUsd: 100 },
-    'ask_first',
-    { ok: true, protocol: 'polymarket', summary: 'ok', warnings: [], blocks: [], estimatedCostUsd: 10 },
-  )
-
-  assert.equal(decision.allowed, true)
-  assert.equal(decision.mode, 'ask_first')
-})
-
-test('simulates Polymarket event action with max price guard', async () => {
-  const ok = await simulateAutomationAction({
-    protocol: 'polymarket',
-    marketId: 'm1',
-    side: 'YES',
-    maxSpend: 25,
-    maxPrice: 0.65,
-  }, { polymarketPrice: 0.55 })
-
-  const blocked = await simulateAutomationAction({
-    protocol: 'polymarket',
-    marketId: 'm1',
-    side: 'YES',
-    maxSpend: 25,
-    maxPrice: 0.65,
-  }, { polymarketPrice: 0.75 })
-
-  assert.equal(ok.ok, true)
-  assert.equal(blocked.ok, false)
-  assert.match(blocked.blocks.join(' '), /price/i)
-})
-
-test('simulates Hyperliquid trades and requires stop loss when requested', async () => {
-  const result = await simulateAutomationAction({
-    protocol: 'hyperliquid',
-    kind: 'trade',
-    market: 'ETH',
-    side: 'short',
-    amountUsd: 50,
-    leverage: 2,
-  }, { requireStopLoss: true })
-
-  assert.equal(result.ok, false)
-  assert.match(result.blocks.join(' '), /stop loss/i)
-})
-
-test('simulates Hyperliquid information monitors as read-only', async () => {
-  const result = await simulateHyperliquidInfoMonitor({
-    trigger: { protocol: 'hyperliquid', metric: 'funding_rate', market: 'BTC', condition: 'above', threshold: 0.01 },
-    action: { kind: 'notify', message: 'BTC funding is high.' },
-    policy: {},
-    mode: 'notify_only',
-    validFor: '1h',
-    validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-  }, { currentValue: 0.012 })
-
-  assert.equal(result.ok, true)
-  assert.equal(result.protocol, 'hyperliquid')
-  assert.match(result.summary, /funding_rate/)
-})
-
 test('plan entitlements limit data-based automations', () => {
   assert.equal(getPlanEntitlement('free').dataAutomationSlots, 1)
   assert.equal(getPlanEntitlement('pro').dataAutomationSlots, 5)
@@ -430,7 +201,6 @@ test('plan entitlements limit data-based automations', () => {
 
 test('complex event automation intake lists missing setup questions', () => {
   const result = checkEventAutomationIntake({
-    protocol: 'hyperliquid',
     topic: 'middle_east_conflict',
     eventType: 'military_attack',
   })
@@ -438,87 +208,6 @@ test('complex event automation intake lists missing setup questions', () => {
   assert.equal(result.ok, false)
   const formatted = formatMissingQuestions(result)
   assert.match(formatted, /How long should this automation stay active/)
-  assert.match(formatted, /What stop loss percent should protect the trade/)
-})
-
-test('automations tool creates event trigger automation in plain English output', async () => {
-  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-tool-event-${Date.now()}.enc`
-  setAutomationReadinessProbeForTests(async () => ({ allowed: true }))
-  try {
-    const result = await automationsModule.handle('automations', {
-      action: 'create_event',
-      plan: 'free',
-      topic: 'iran_israel_conflict',
-      eventType: 'military_attack',
-      actor: 'Iran',
-      target: 'Israel',
-      protocol: 'polymarket',
-      marketId: 'm1',
-      side: 'YES',
-      maxSpend: 10,
-      maxPrice: 0.65,
-      validFor: '1h',
-      mode: 'notify_only',
-    })
-
-    const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
-    assert.match(output, /Event Automation Created/i)
-    assert.match(output, /Grok verification/i)
-    assert.match(output, /Plan: free/i)
-  } finally {
-    setAutomationReadinessProbeForTests(null)
-  }
-})
-
-test('automations tool refuses Polymarket event automation when setup is not ready', async () => {
-  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-tool-event-not-ready-${Date.now()}.enc`
-  setAutomationReadinessProbeForTests(async () => ({
-    allowed: false,
-    message: 'Polymarket setup is not ready. Add Polygon USDC and approvals first.',
-  }))
-
-  try {
-    const result = await automationsModule.handle('automations', {
-      action: 'create_event',
-      plan: 'pro',
-      topic: 'iran_israel_conflict',
-      eventType: 'military_attack',
-      actor: 'Iran',
-      target: 'Israel',
-      protocol: 'polymarket',
-      marketId: 'm1',
-      side: 'YES',
-      maxSpend: 10,
-      maxPrice: 0.65,
-      validFor: '1h',
-      mode: 'notify_only',
-    })
-
-    const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
-    assert.equal(result?.isError, true)
-    assert.match(output, /Polymarket setup is not ready/i)
-    assert.equal(loadAutomations(process.env.AGNT_AUTOMATIONS_PATH).automations.length, 0)
-  } finally {
-    setAutomationReadinessProbeForTests(null)
-  }
-})
-
-test('automations tool creates Hyperliquid information monitor', async () => {
-  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-tool-monitor-${Date.now()}.enc`
-  const result = await automationsModule.handle('automations', {
-    action: 'create_hl_monitor',
-    plan: 'pro',
-    metric: 'funding_rate',
-    market: 'BTC',
-    condition: 'above',
-    threshold: 0.01,
-    validFor: '1h',
-    mode: 'notify_only',
-  })
-
-  const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
-  assert.match(output, /Hyperliquid Monitor Created/i)
-  assert.match(output, /funding_rate/i)
 })
 
 test('twitterapi client stays disabled without API key', () => {
@@ -601,11 +290,10 @@ test('tweet ingestion verifies and matches event automations', async () => {
     automations: [{
       id: 'auto1',
       type: 'event_trigger',
-      name: 'Buy YES',
+      name: 'Event notification',
       params: {
         trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
-        action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
-        policy: {},
+        action: { kind: 'notify' },
         mode: 'notify_only',
         validFor: '1h',
         validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -632,7 +320,7 @@ test('tweet ingestion uses fast verifier before Grok for clear trusted events', 
   const rule = compileEventAutomation({
     automationId: 'auto_fast_1',
     topic: 'iran_israel_conflict',
-    triggerText: 'buy YES if Iran attacks Israel',
+    triggerText: 'notify if Iran attacks Israel',
     sourceHandles: ['sentdefender'],
     sourceTiers: { sentdefender: 0.95 },
     verificationMode: 'speed',
@@ -653,11 +341,10 @@ test('tweet ingestion uses fast verifier before Grok for clear trusted events', 
     automations: [{
       id: 'auto_fast_1',
       type: 'event_trigger',
-      name: 'Buy YES',
+      name: 'Event notification',
       params: {
         trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
-        action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
-        policy: {},
+        action: { kind: 'notify' },
         mode: 'notify_only',
         validFor: '1h',
         validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -704,11 +391,10 @@ test('runner builds hot cache from active event automations', () => {
   const cache = buildEventHotCacheFromAutomations([{
     id: 'auto_runner_1',
     type: 'event_trigger',
-    name: 'Buy YES',
+    name: 'Event notification',
     params: {
       trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
-      action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
-      policy: {},
+      action: { kind: 'notify' },
       mode: 'notify_only',
       verificationMode: 'speed',
       actionReady: true,
@@ -737,8 +423,7 @@ test('tweet ingestion dispatches notify-only event automations and records laten
       name: 'Notify event',
       params: {
         trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack', actor: 'Iran', target: 'Israel', minConfidence: 0.8 },
-        action: { protocol: 'polymarket', marketId: 'm1', side: 'YES', maxSpend: 10 },
-        policy: {},
+        action: { kind: 'notify' },
         mode: 'notify_only',
         validFor: '1h',
         validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -767,29 +452,76 @@ test('tweet ingestion dispatches notify-only event automations and records laten
   }
 })
 
-test('automations tool refuses event automation without validity window', async () => {
-  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-tool-missing-validity-${Date.now()}.enc`
-  const result = await automationsModule.handle('automations', {
-    action: 'create_event',
-    plan: 'pro',
-    topic: 'iran_israel_conflict',
-    eventType: 'military_attack',
-    actor: 'Iran',
-    target: 'Israel',
-    protocol: 'polymarket',
-    marketId: 'm1',
-    side: 'YES',
-    maxSpend: 10,
-    mode: 'notify_only',
-  })
-
-  const output = result?.content?.[0]?.type === 'text' ? result.content[0].text : ''
-  assert.equal(result?.isError, true)
-  assert.match(output, /How long should this automation stay active/i)
-})
-
 test('twitter ingestion remains disabled without TWITTERAPI_IO_KEY', () => {
   delete process.env.TWITTERAPI_IO_KEY
   const client = new TwitterApiIoClient({ apiKey: process.env.TWITTERAPI_IO_KEY })
   assert.equal(client.isEnabled(), false)
+})
+
+function legacyAutomation(overrides: Partial<AutomationEntry> = {}): AutomationEntry {
+  return {
+    id: 'legacy-auto',
+    type: 'dca',
+    name: 'Saved automation',
+    userId: 'usr_legacy',
+    params: { tokenIn: 'USDC', tokenOut: 'ETH', amount: 1 },
+    intervalMs: 30_000,
+    maxRuns: 3,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    lastRun: null,
+    nextRun: new Date(Date.now() + 30_000).toISOString(),
+    runCount: 1,
+    history: [{ time: new Date().toISOString(), result: 'Previous execution', success: true }],
+    ...overrides,
+  }
+}
+
+test('legacy integrations remain saved but cannot resume or be retargeted', () => {
+  const previousPath = process.env.AGNT_AUTOMATIONS_PATH
+  process.env.AGNT_AUTOMATIONS_PATH = `./.agnt/test-legacy-automations-${Date.now()}.json`
+  const legacy = [
+    legacyAutomation(),
+    legacyAutomation({ id: 'legacy-trade', type: 'event_trigger', params: {
+      trigger: { topic: 'iran_israel_conflict', eventType: 'military_attack' },
+      action: { protocol: 'polymarket', marketId: 'saved-market', side: 'YES', maxSpend: 10 },
+      mode: 'auto_execute', validUntil: new Date(Date.now() + 60_000).toISOString(),
+    } }),
+    legacyAutomation({ id: 'legacy-monitor', type: 'market_monitor', params: { trigger: { protocol: 'hyperliquid', metric: 'funding_rate' } } }),
+  ]
+  writeFileSync(process.env.AGNT_AUTOMATIONS_PATH, JSON.stringify({ automations: legacy }))
+  try {
+    const saved = loadAutomations().automations
+    assert.deepEqual(JSON.parse(readFileSync(process.env.AGNT_AUTOMATIONS_PATH!, 'utf8')).automations, legacy)
+    assert.equal(saved.length, legacy.length)
+    for (const [index, auto] of saved.entries()) {
+      assert.equal(auto.status, 'paused')
+      assert.equal(auto.nextRun, null)
+      assert.deepEqual(auto.params, legacy[index].params)
+      assert.equal(auto.history[0].result, 'Previous execution')
+      const resumed = updateAutomationStatusForUser(auto.id, 'usr_legacy', 'active')
+      assert.equal(resumed?.status, 'paused')
+      assert.equal(resumed?.runCount, 1)
+      assert.equal(resumed?.nextRun, null)
+      assert.match(resumed?.history.at(-1)?.result || '', /no longer supported/)
+    }
+    assert.equal(deriveSourceState(legacy).topicRules.length, 0)
+    assert.equal(buildEventHotCacheFromAutomations(legacy).rulesForSource('Reuters').length, 0)
+  } finally {
+    if (previousPath === undefined) delete process.env.AGNT_AUTOMATIONS_PATH
+    else process.env.AGNT_AUTOMATIONS_PATH = previousPath
+  }
+})
+
+test('legacy event trade dispatcher cannot submit or turn a trade into a notification', async () => {
+  const auto = legacyAutomation({ type: 'event_trigger', params: {
+    action: { protocol: 'hyperliquid', kind: 'trade', market: 'ETH', amountUsd: 50 },
+    mode: 'auto_execute',
+  } })
+  const result = await dispatchMatchedEventAutomation(auto, {
+    id: 'event', topic: 'crypto_security', eventType: 'protocol_exploit', entities: [], assetImpact: [],
+    confidence: 1, sourceTweetIds: [], createdAt: new Date().toISOString(), summary: 'Verified event',
+  })
+  assert.equal(result.submitted, false)
+  assert.match(result.reason, /unavailable or paused/)
 })

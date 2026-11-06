@@ -1,0 +1,131 @@
+.toolkit-page { width: min(1180px, calc(100% - 112px)); margin: 0 auto; padding: 176px 0 100px; color: #e8e8e5; font-family: var(--font-sans); }
+.toolkit-page *, .toolkit-page *::before, .toolkit-page *::after { text-shadow: none; }
+.tk-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 48px; margin-bottom: 58px; }
+.tk-heading h1 { margin: 0; font: 400 clamp(50px, 6.4vw, 88px)/1.02 var(--font-accent); letter-spacing: 0; text-transform: none; }
+.tk-heading h1 span { color: #777775; }
+.tk-intro { padding-bottom: 8px; }
+.tk-intro p { margin: 0; color: #a5a5a2; font-size: 17px; line-height: 1.65; }
+.tk-networks { display: flex; gap: 0; margin-top: 26px; color: #d2d2cf; font-size: 12px; }
+.tk-networks span + span { padding-left: 18px; margin-left: 18px; border-left: 1px solid #424240; }
+.tk-connect { overflow: hidden; border: 1px solid #2b2b2a; border-radius: 16px; background: #0b0b0b; }
+.tk-connect-top { display: flex; align-items: center; justify-content: space-between; padding: 26px 32px; border-bottom: 1px solid #272726; }
+.tk-connect-top h2 { margin: 0; font: 500 21px/1.25 var(--font-sans); letter-spacing: -.02em; }
+.tk-connect-grid { display: grid; grid-template-columns: 270px minmax(0, 1fr); }
+.tk-client-picker { display: flex; flex-direction: column; gap: 6px; padding: 24px 18px; border-right: 1px solid #272726; background: #080808; }
+.tk-client-picker button { display: flex; align-items: center; gap: 15px; width: 100%; min-height: 74px; padding: 13px 15px; color: #a8a8a5; border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; font-family: var(--font-sans); transition: background .15s, color .15s; }
+.tk-client-picker button:hover { background: #121212; color: #fff; }
+.tk-client-picker button[aria-pressed='true'] { color: #eee; border-color: #343432; background: #1b1b1a; }
+.tk-client-icon { display: grid; flex-shrink: 0; place-items: center; width: 27px; height: 27px; }
+.tk-client-icon img, .tk-client-icon svg { width: 25px; height: 25px; object-fit: contain; filter: grayscale(1); }
+.tk-client-name { flex: 1; font-size: 15px; font-weight: 500; }
+.tk-client-name small { display: block; margin-top: 5px; color: #81817f; font-size: 11px; font-weight: 400; }
+.tk-client-picker button > svg { width: 17px; height: 17px; opacity: 0; }
+.tk-client-picker button[aria-pressed='true'] > svg { opacity: 1; }
+.tk-guide { min-width: 0; padding: 38px 40px; }
+.tk-guide h3 { margin: 0 0 27px; font: 500 clamp(23px, 2.4vw, 30px)/1.25 var(--font-sans); letter-spacing: -.025em; }
+.tk-steps { display: grid; gap: 18px; margin: 0 0 32px; padding: 0; list-style: none; }
+.tk-steps li { display: grid; grid-template-columns: 24px 1fr; align-items: baseline; gap: 16px; }
+.tk-steps li > span { color: #71716e; font: 400 10px/1.6 var(--font-mono, monospace); }
+.tk-steps p { margin: 0; color: #b2b2ae; font-size: 14px; line-height: 1.65; }
+.tk-endpoint-label { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 10px; color: #b2b2ae; font-size: 11px; }
+.tk-endpoint-label span + span { color: #777774; }
+.tk-url-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border: 1px solid #3d3d39; border-radius: 7px; background: #141413; }
+.tk-url-row input { flex: 1; width: 0; min-width: 0; padding: 6px 0; border: 0; outline: 0; background: transparent; color: #ebebe6; font: 400 12px/1.6 var(--font-mono, monospace); }
+.tk-copy { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 7px; padding: 9px 11px; border: 1px solid #353532; border-radius: 5px; background: #20201e; color: #d8d8d1; font: 400 11px/1.2 var(--font-sans); cursor: pointer; transition: background .15s; }
+.tk-copy:hover { background: #30302d; }
+.tk-copy svg { width: 16px; height: 16px; }
+.tk-config { overflow: hidden; margin-top: 23px; border: 1px solid #292927; border-radius: 7px; }
+.tk-config > div { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 13px; border-bottom: 1px solid #292927; }
+.tk-config > div > span { color: #9d9d98; font-size: 11px; }
+.tk-config .tk-copy { padding: 5px 7px; border-color: transparent; background: transparent; }
+.tk-config pre { overflow-x: auto; margin: 0; padding: 19px 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d4d4cf; font: 400 12px/1.75 var(--font-mono, monospace); }
+.tk-config code { font: inherit; }
+.tk-guide-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; margin-top: 28px; }
+.tk-primary-action { display: inline-flex; align-items: center; justify-content: center; gap: 20px; padding: 13px 19px; border: 1px solid #deded8; border-radius: 7px; background: #e8e8e0; color: #161615; font: 500 13px var(--font-sans); transition: background .15s; }
+.tk-primary-action:hover { background: #fff; }
+.tk-primary-action svg { width: 18px; height: 18px; }
+.tk-guide-link { display: inline-flex; align-items: center; gap: 10px; color: #bdbdb6; font: 400 12px/1.5 var(--font-sans); }
+.tk-guide-link:hover { color: #fff; }
+.tk-connect-bottom { display: flex; justify-content: space-between; gap: 20px; padding: 19px 32px; border-top: 1px solid #272726; color: #8e8e89; font-size: 11px; }
+.tk-prompts, .tk-faq { margin-top: 112px; }
+.tk-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 34px; }
+.tk-section-heading h2 { margin: 0; font: 400 clamp(30px, 3.6vw, 47px)/1.12 var(--font-accent); letter-spacing: 0; }
+.tk-section-heading > p { color: #94948f; font-size: 14px; line-height: 1.7; }
+.tk-prompt-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
+.tk-prompt-grid article { display: flex; flex-direction: column; align-items: flex-start; padding: 25px; border: 1px solid #282826; border-radius: 10px; background: #0a0a0a; }
+.tk-prompt-label { color: #7f7f7a; font: 400 9px/1.5 var(--font-mono, monospace); letter-spacing: .12em; }
+.tk-prompt-grid p { min-height: 81px; margin: 19px 0 21px; color: #d8d8d1; font-size: 17px; line-height: 1.55; }
+.tk-prompt-grid .tk-copy { margin-top: auto; padding: 0; border: 0; background: transparent; color: #8f8f88; }
+.tk-prompt-grid .tk-copy:hover { color: #eee; }
+.tk-faq .accordion-wrap { max-width: none; margin: 0; padding: 0; overflow: hidden; border: 1px solid #292929; border-radius: 16px; background: #080808; }
+.tk-faq .accord-item { border-bottom: 1px solid #252525; }
+.tk-faq .accord-item:first-child { border-top: 0; }
+.tk-faq .accord-item:last-child { border-bottom: 0; }
+.tk-faq .accord-header { min-height: 104px; padding: 28px 32px; gap: 28px; transition: background .2s; }
+.tk-faq .accord-header:hover { padding-left: 32px; background: #101010; }
+.tk-faq .accord-header:focus-visible { outline-offset: -5px; }
+.tk-faq .accord-left { gap: 27px; }
+.tk-faq .accord-num { min-width: 28px; color: #888; font: 400 11px/1 var(--mono); letter-spacing: .04em; }
+.tk-faq .accord-title { color: #d9d9d9; font: 500 24px/1.3 var(--font-sans); letter-spacing: -.025em; text-transform: none; }
+.tk-faq .accord-toggle { width: 34px; height: 34px; border: 1px solid #3a3a3a; border-radius: 50%; background: transparent; }
+.tk-faq .accord-toggle svg { width: 16px; height: 16px; }
+.tk-faq .accord-item.open .accord-toggle { background: #e6e6e3; }
+.tk-faq .accord-inner { padding: 0 87px 34px; }
+.tk-faq .accord-inner > p { max-width: 860px; margin: 0; color: #a6a6a6; font: 400 16px/1.8 var(--font-sans); }
+.toolkit-page button:focus-visible, .toolkit-page a:focus-visible, .toolkit-page summary:focus-visible, .tk-url-row:focus-within { outline: 2px solid #e8e8e0; outline-offset: 4px; }
+@media (max-width: 1000px) {
+  .toolkit-page { width: calc(100% - 64px); padding-top: 150px; }
+  .tk-heading { gap: 25px; }
+  .tk-intro p { font-size: 15px; }
+  .tk-connect-grid { grid-template-columns: 225px minmax(0, 1fr); }
+  .tk-client-picker { padding: 20px 12px; }
+  .tk-guide { padding: 30px 26px; }
+  .tk-prompt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tk-prompt-grid p { min-height: 54px; }
+}
+@media (max-width: 700px) {
+  .toolkit-page { width: calc(100% - 36px); padding: 134px 0 68px; }
+  .tk-heading { flex-direction: column; align-items: flex-start; gap: 24px; margin-bottom: 32px; }
+  .tk-heading h1 { font-size: clamp(44px, 12vw, 72px); }
+  .tk-intro p { font-size: 15px; }
+  .tk-networks { margin-top: 18px; }
+  .tk-connect-top { padding: 22px; }
+  .tk-connect-top h2 { font-size: 18px; }
+  .tk-connect-grid { grid-template-columns: 1fr; }
+  .tk-client-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; padding: 17px; border-right: 0; border-bottom: 1px solid #272726; }
+  .tk-client-picker button { flex-direction: column; justify-content: center; gap: 9px; min-height: 81px; padding: 12px 3px; text-align: center; }
+  .tk-client-name { flex: none; font-size: 11px; }
+  .tk-client-name small, .tk-client-picker button > svg { display: none; }
+  .tk-client-icon, .tk-client-icon img, .tk-client-icon svg { width: 22px; height: 22px; }
+  .tk-guide { padding: 26px 20px; }
+  .tk-guide h3 { font-size: 23px; margin-bottom: 24px; }
+  .tk-steps { gap: 16px; margin-bottom: 28px; }
+  .tk-steps li { gap: 10px; grid-template-columns: 20px 1fr; }
+  .tk-steps p { font-size: 13px; }
+  .tk-url-row { flex-wrap: wrap; gap: 8px; padding: 12px; }
+  .tk-url-row input { flex-basis: 100%; width: 100%; font-size: 11px; }
+  .tk-url-row .tk-copy { width: 100%; padding: 10px; }
+  .tk-config pre { font-size: 11px; padding: 15px 12px; }
+  .tk-config > div { gap: 8px; padding: 9px 10px; }
+  .tk-config > div > span { font-size: 10px; }
+  .tk-config .tk-copy { font-size: 10px; }
+  .tk-guide-actions { gap: 19px; }
+  .tk-primary-action { width: 100%; }
+  .tk-connect-bottom { padding: 17px 20px; gap: 10px; font-size: 9px; }
+  .tk-prompts, .tk-faq { margin-top: 76px; }
+  .tk-section-heading { flex-direction: column; align-items: flex-start; gap: 18px; margin-bottom: 27px; }
+  .tk-section-heading h2 { font-size: clamp(30px, 8vw, 42px); }
+  .tk-section-heading > p { font-size: 13px; }
+  .tk-prompt-grid { gap: 12px; grid-template-columns: 1fr; }
+  .tk-prompt-grid article { padding: 24px; }
+  .tk-prompt-grid p { min-height: 0; margin: 14px 0 20px; font-size: 17px; }
+  .tk-faq .accord-header { min-height: 94px; padding: 23px 20px; gap: 15px; }
+  .tk-faq .accord-header:hover { padding-left: 20px; }
+  .tk-faq .accord-left { gap: 12px; }
+  .tk-faq .accord-num { min-width: 23px; font-size: 10px; }
+  .tk-faq .accord-title { font-size: 20px; }
+  .tk-faq .accord-toggle { width: 28px; height: 28px; }
+  .tk-faq .accord-inner { padding: 0 20px 24px; }
+  .tk-faq .accord-inner > p { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .toolkit-page * { transition: none !important; } }

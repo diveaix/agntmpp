@@ -1,94 +1,64 @@
+import { useId } from 'react'
+
 export default function MacScreen() {
+  const id = useId()
+
   return (
-    <svg className="mac-svg" viewBox="0 0 520 680" xmlns="http://www.w3.org/2000/svg">
+    <svg className="mac-svg" viewBox="0 0 520 680" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
-        <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#d4cbb8" />
-          <stop offset="35%" stopColor="#c7bda8" />
-          <stop offset="100%" stopColor="#b0a590" />
+        <linearGradient id={`${id}-case`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#eeede6" />
+          <stop offset=".45" stopColor="#d2d1ca" />
+          <stop offset="1" stopColor="#adaaa3" />
         </linearGradient>
-        <linearGradient id="topHL" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(255,255,245,0.2)" />
-          <stop offset="100%" stopColor="rgba(255,255,245,0)" />
+        <linearGradient id={`${id}-face`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#d7d6cf" />
+          <stop offset="1" stopColor="#c2c1b9" />
         </linearGradient>
-        <linearGradient id="bezelGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#bfb5a0" />
-          <stop offset="100%" stopColor="#a89b86" />
+        <linearGradient id={`${id}-base`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#908f87" />
+          <stop offset=".25" stopColor="#bcbab2" />
+          <stop offset=".85" stopColor="#aaa89f" />
+          <stop offset="1" stopColor="#918f86" />
         </linearGradient>
-        <filter id="screenShadow">
-          <feDropShadow dx="0" dy="3" stdDeviation="8" floodColor="#000" floodOpacity=".6" />
-        </filter>
-        <filter id="macShadow">
-          <feDropShadow dx="0" dy="10" stdDeviation="25" floodColor="#000" floodOpacity=".5" />
-        </filter>
-        <linearGradient id="leftEdge" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="rgba(255,252,240,0.12)" />
-          <stop offset="100%" stopColor="rgba(255,252,240,0)" />
-        </linearGradient>
-        <linearGradient id="rightEdge" x1="1" y1="0" x2="0" y2="0">
-          <stop offset="0%" stopColor="rgba(0,0,0,0.08)" />
-          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-        </linearGradient>
-        <linearGradient id="chinGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#c2b8a3" />
-          <stop offset="100%" stopColor="#b5a993" />
-        </linearGradient>
-        <linearGradient id="ventGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#8a7e6c" />
-          <stop offset="100%" stopColor="#7a6f5e" />
+        <linearGradient id={`${id}-glass`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#282a2a" />
+          <stop offset=".35" stopColor="#141616" />
+          <stop offset="1" stopColor="#090b0b" />
         </linearGradient>
       </defs>
 
-      {/* Main body */}
-      <rect x="40" y="20" width="440" height="580" rx="16" fill="url(#bodyGrad)" filter="url(#macShadow)" />
-      <rect x="40" y="20" width="440" height="40" rx="16" fill="url(#topHL)" />
-      <rect x="40" y="20" width="12" height="580" rx="8" fill="url(#leftEdge)" />
-      <rect x="468" y="20" width="12" height="580" rx="8" fill="url(#rightEdge)" />
-      <rect x="40" y="20" width="440" height="580" rx="16" fill="none" stroke="rgba(180,170,150,0.15)" strokeWidth="1" />
+      {/* The plinth belongs to the cabinet and sits behind its lower lip. */}
+      <rect x="52" y="570" width="416" height="60" rx="8" fill={`url(#${id}-base)`} />
+      <path d="M64 624H456" fill="none" stroke="#78756e" strokeOpacity=".5" />
 
-      {/* Screen bezel */}
-      <rect x="58" y="40" width="404" height="355" rx="10" fill="url(#bezelGrad)" />
-      <rect x="58" y="40" width="404" height="355" rx="10" fill="none" stroke="rgba(160,150,130,0.12)" strokeWidth=".5" />
-      <rect x="68" y="50" width="384" height="335" rx="7" fill="#030303" filter="url(#screenShadow)" />
-      <rect x="72" y="54" width="376" height="327" rx="5" fill="#060606" />
-      <ellipse cx="180" cy="100" rx="80" ry="35" fill="rgba(255,255,255,0.012)" />
-      <rect x="90" y="370" width="340" height="8" rx="4" fill="rgba(0,0,0,0.04)" />
+      {/* Molded front shell: a broad face framed by soft, substantial bevels. */}
+      <rect x="40" y="50" width="440" height="520" rx="18" fill={`url(#${id}-case)`} stroke="#9d9a92" strokeWidth=".8" />
+      <path d="M58 51H462Q477 51 479 67" fill="none" stroke="#f8f7f0" strokeOpacity=".8" />
+      <rect x="51" y="63" width="418" height="493" rx="10" fill={`url(#${id}-face)`} />
+      <path d="M53 548Q53 558 63 558H457" fill="none" stroke="#f0eee6" strokeOpacity=".4" />
 
-      {/* Chin */}
-      <rect x="58" y="410" width="404" height="175" rx="10" fill="url(#chinGrad)" />
-      <rect x="58" y="410" width="404" height="175" rx="10" fill="none" stroke="rgba(160,150,130,0.1)" strokeWidth=".5" />
-      <line x1="78" y1="415" x2="442" y2="415" stroke="rgba(0,0,0,0.1)" strokeWidth=".5" />
-      <image href="/AGNT.svg" x="215" y="435" width="24" height="24" opacity="0.35" />
-      <text x="272" y="455" textAnchor="middle" fontFamily="'Space Mono',monospace" fontSize="16" fontWeight="700" fill="rgba(0,0,0,0.3)" letterSpacing="4">AGNT</text>
+      {/* Four sloping surfaces recess the CRT into the face. */}
+      <rect x="62" y="80" width="396" height="330" rx="18" fill="#b6b4ac" />
+      <path d="M80 80H440Q458 80 458 98L436 115Q430 102 418 102H102Q90 102 84 115L62 98Q62 80 80 80Z" fill="#98958b" />
+      <path d="M62 98L84 115V375L62 392Z" fill="#a8a49a" />
+      <path d="M458 98L436 115V375L458 392Z" fill="#cdc9c1" />
+      <path d="M62 392L84 375Q90 388 102 388H418Q430 388 436 375L458 392Q458 410 440 410H80Q62 410 62 392Z" fill="#e8e5dc" />
+      <rect x="82" y="102" width="356" height="286" rx="19" fill="#1e201e" />
+      <rect x="85" y="106" width="350" height="277" rx="16" fill="#0b0c0b" />
+      <rect x="88" y="112" width="344" height="266" rx="13" fill={`url(#${id}-glass)`} />
+      <path d="M103 106Q260 96 418 106" fill="none" stroke="#f5f3ed" strokeOpacity=".1" />
 
-      {/* Floppy */}
-      <rect x="170" y="478" width="180" height="8" rx="3" fill="url(#ventGrad)" stroke="rgba(100,90,75,0.2)" strokeWidth=".5" />
-      <line x1="178" y1="482" x2="342" y2="482" stroke="rgba(60,55,45,0.15)" strokeWidth=".3" />
+      {/* Asymmetric disk aperture and recessed eject detail. */}
+      <path d="M271 453H436V478H271L278 471V460Z" fill="#e4e1d8" />
+      <path d="M278 460H429V472H278Z" fill="#848175" />
+      <rect x="281" y="463" width="148" height="7" rx=".8" fill="#28271f" />
+      <path d="M399 454H434V474H405V465H399Z" fill="#9b9688" />
+      <path d="M399 453H434V461H405Z" fill="#dbd7ca" />
+      <circle cx="444" cy="470" r="1.5" fill="#5c574a" />
 
-      {/* Vents */}
-      <g opacity=".6">
-        {[510, 518, 526, 534, 542, 550].map((y) => (
-          <rect key={y} x="140" y={y} width="240" height="3" rx="1.5" fill="#8a7e6c" stroke="rgba(0,0,0,0.1)" strokeWidth=".3" />
-        ))}
-      </g>
-
-      {/* LED */}
-      <circle cx="420" cy="560" r="4" fill="#a09580" stroke="rgba(0,0,0,0.15)" strokeWidth=".5" />
-      <circle cx="420" cy="560" r="2" fill="#4a4" opacity="1">
-        <animate attributeName="opacity" values=".4;.9;.4" dur="3s" repeatCount="indefinite" />
-      </circle>
-
-      {/* Base */}
-      <rect x="30" y="608" width="460" height="14" rx="4" fill="#b0a590" stroke="rgba(0,0,0,0.1)" strokeWidth=".5" />
-      <rect x="20" y="622" width="480" height="10" rx="5" fill="#a89b86" />
-      <rect x="20" y="622" width="480" height="10" rx="5" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth=".5" />
-      <rect x="60" y="640" width="400" height="30" rx="4" fill="rgba(180,170,150,0.04)" />
-      <line x1="58" y1="398" x2="462" y2="398" stroke="rgba(0,0,0,0.06)" strokeWidth=".3" />
-
-      {/* Screws */}
-      {[[70,32],[450,32],[70,588],[450,588]].map(([cx,cy], i) => (
-        <circle key={i} cx={cx} cy={cy} r="2.5" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth=".5" />
-      ))}
+      <text x="83" y="527" fill="#696458" fontFamily="'Space Mono', monospace" fontSize="13" letterSpacing=".7">./AGENT</text>
+      <path d="M57 570H463" fill="none" stroke="#6f695e" strokeOpacity=".65" />
     </svg>
   )
 }

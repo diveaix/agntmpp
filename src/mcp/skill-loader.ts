@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Skill Loader
+ * ./AGENT Protocol — Skill Loader
  *
  * Auto-discovers and loads .ts skill files from the skills/ directory.
  * Skills use the same ToolModule interface as built-in tools.

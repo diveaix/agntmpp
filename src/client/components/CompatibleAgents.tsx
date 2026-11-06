@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
+import '../supporting-sections.css'
 
 interface Agent {
-  num: string
   name: string
   logo: string
   url: string
@@ -9,14 +9,14 @@ interface Agent {
 }
 
 const AGENTS: Agent[] = [
-  { num: '01', name: 'Codex', logo: '/codex-color.svg', url: 'https://openai.com/codex' },
-  { num: '02', name: 'Claude Code', logo: '/claudecode-color.svg', url: 'https://claude.com/product/claude-code' },
-  { num: '03', name: 'Cursor', logo: '/cursor.svg', url: 'https://www.cursor.com/', inlineSvg: true },
-  { num: '04', name: 'OpenCode', logo: '/opencode.svg', url: 'https://opencode.ai/', inlineSvg: true },
-  { num: '05', name: 'Gemini CLI', logo: '/geminicli-color.svg', url: 'https://geminicli.com' },
-  { num: '06', name: 'AI Studio', logo: '/aistudio.svg', url: 'https://aistudio.google.com/', inlineSvg: true },
-  { num: '07', name: 'Windsurf', logo: '/windsurf.svg', url: 'https://windsurf.com/', inlineSvg: true },
-  { num: '08', name: 'Amp', logo: '/amp-color.svg', url: 'https://ampcode.com/' },
+  { name: 'Codex', logo: '/codex-color.svg', url: 'https://openai.com/codex' },
+  { name: 'Claude Code', logo: '/claudecode-color.svg', url: 'https://claude.com/product/claude-code' },
+  { name: 'Cursor', logo: '/cursor.svg', url: 'https://www.cursor.com/', inlineSvg: true },
+  { name: 'OpenCode', logo: '/opencode.svg', url: 'https://opencode.ai/', inlineSvg: true },
+  { name: 'Gemini CLI', logo: '/geminicli-color.svg', url: 'https://geminicli.com' },
+  { name: 'AI Studio', logo: '/aistudio.svg', url: 'https://aistudio.google.com/', inlineSvg: true },
+  { name: 'Windsurf', logo: '/windsurf.svg', url: 'https://windsurf.com/', inlineSvg: true },
+  { name: 'Amp', logo: '/amp-color.svg', url: 'https://ampcode.com/' },
 ]
 
 function InlineSvg({ src, alt }: { src: string; alt: string }) {
@@ -45,22 +45,19 @@ function InlineSvg({ src, alt }: { src: string; alt: string }) {
 
 export default function CompatibleAgents() {
   return (
-    <section className="compat-section" id="compatible-agents">
-      <div className="compat-header">
-        <span className="compat-dot">◆</span>
-        <span className="compat-label">COMPATIBLE CODING AGENTS</span>
-        <span className="compat-dot">◆</span>
+    <section className="compat-section site-section" id="compatible-agents" aria-labelledby="compatible-agents-title">
+      <div className="section-heading">
+        <h2 className="section-title" id="compatible-agents-title">Compatible agents</h2>
       </div>
       <div className="compat-grid">
         {AGENTS.map((agent) => (
           <a
             className="compat-card"
-            key={agent.num}
+            key={agent.name}
             href={agent.url}
             target="_blank"
             rel="noopener noreferrer"
           >
-            <span className="compat-num">{agent.num}</span>
             <div className="compat-logo-wrap">
               {agent.inlineSvg ? (
                 <InlineSvg src={agent.logo} alt={agent.name} />
@@ -74,12 +71,10 @@ export default function CompatibleAgents() {
               )}
             </div>
             <span className="compat-name">{agent.name}</span>
+            <svg className="compat-link-arrow" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 15 15 5M5 5h10v10" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </a>
         ))}
       </div>
-      <p className="compat-sub">
-        Works with any MCP-compatible agent. One URL, instant access.
-      </p>
     </section>
   )
 }

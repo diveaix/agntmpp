@@ -20,13 +20,6 @@ function getGreeting(): string {
 import Footer from '../components/Footer'
 import Nav from '../components/Nav'
 
-type Entitlement = {
-  dataAutomationSlots: number
-  customSourceSlots: number
-  eventEvaluationsMonthly: number
-  executionsMonthly: number
-}
-
 type ApiKey = {
   id: string
   ownerEmail?: string
@@ -50,18 +43,6 @@ type ConnectorLink = {
   revokedAt: string | null
 }
 
-type Automation = {
-  id: string
-  type: string
-  name: string
-  status: string
-  params: Record<string, unknown>
-  createdAt: string
-  lastRun: string | null
-  nextRun: string | null
-  runCount: number
-}
-
 type HistoryItem = {
   automationId: string
   automationName: string
@@ -71,16 +52,6 @@ type HistoryItem = {
   time: string
   result: string
   success: boolean
-}
-
-type Source = {
-  id: string
-  handle: string
-  displayName?: string
-  topics: string[]
-  keywords: string[]
-  enabled: boolean
-  trustScore: number
 }
 
 type WalletBalance = {
@@ -101,10 +72,6 @@ type WalletSummary = {
 
 type DashboardMe = {
   user: { id: string; email?: string }
-  plan: string
-  subscriptionStatus: string
-  entitlement: Entitlement
-  counts: { automations: number; activeAutomations: number; customSources: number }
   apiKeys: ApiKey[]
   error?: string
   error_description?: string
@@ -114,10 +81,7 @@ type DashboardSnapshot = {
   me: DashboardMe
   apiKeys: ApiKey[]
   connectorLinks: ConnectorLink[]
-  automations: Automation[]
   history: HistoryItem[]
-  sources: Source[]
-  sourceLimit: number
   wallets: WalletSummary[]
   walletExportAvailable: boolean
   walletPasswordSet: boolean
@@ -129,12 +93,12 @@ type JsonError = { error?: string; error_description?: string }
 
 async function readJson<T>(response: Response): Promise<T> {
   const raw = await response.text()
-  if (!raw.trim()) throw new Error(`Dashboard server returned an empty ${response.status} response. Make sure the AGNT MCP backend is running.`)
+  if (!raw.trim()) throw new Error(`Dashboard server returned an empty ${response.status} response. Make sure the AGENT MCP backend is running.`)
   let json: T
   try {
     json = JSON.parse(raw) as T
   } catch {
-    throw new Error('Dashboard server returned HTML instead of JSON. Open the dashboard through the AGNT server or start the MCP backend with npm run mcp:serve.')
+    throw new Error('Dashboard server returned HTML instead of JSON. Open the dashboard through the AGENT server or start the MCP backend with npm run mcp:serve.')
   }
   const errorJson = json as JsonError
   if (!response.ok) throw new Error(errorJson.error_description || errorJson.error || `Request failed with ${response.status}.`)
@@ -143,11 +107,6 @@ async function readJson<T>(response: Response): Promise<T> {
 
 function dateText(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : 'N/A'
-}
-
-function topicFromAutomation(auto: Automation) {
-  const trigger = auto.params?.trigger as { topic?: string } | undefined
-  return trigger?.topic || auto.type
 }
 
 function shortAddress(address: string) {
@@ -172,19 +131,16 @@ function visibleBalances(balances: WalletBalance[]) {
 }
 
 /* ── Tab navigation ── */
-const TABS = ['overview', 'wallets', 'keys', 'automations', 'sources', 'history'] as const
+const TABS = ['overview', 'wallets', 'keys', 'history'] as const
 type Tab = typeof TABS[number]
 
-type HistoryFilter = 'all' | 'swaps' | 'bridges' | 'approvals' | 'automations' | 'polymarket' | 'hyperliquid' | 'failures'
+type HistoryFilter = 'all' | 'swaps' | 'bridges' | 'approvals' | 'failures'
 
 const HISTORY_FILTERS: { id: HistoryFilter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'swaps', label: 'Swaps' },
   { id: 'bridges', label: 'Bridges' },
   { id: 'approvals', label: 'Approvals' },
-  { id: 'automations', label: 'Automations' },
-  { id: 'polymarket', label: 'Polymarket' },
-  { id: 'hyperliquid', label: 'Hyperliquid' },
   { id: 'failures', label: 'Failures' },
 ]
 
@@ -196,12 +152,9 @@ function historyMatchesFilter(item: HistoryItem, filter: HistoryFilter) {
   const text = historyText(item)
   if (filter === 'all') return true
   if (filter === 'failures') return !item.success
-  if (filter === 'automations') return item.kind === 'automation'
-  if (filter === 'swaps') return text.includes('swap') || ['tempo_swap', 'smart_swap', 'uniswap', 'pancakeswap'].some((tool) => item.type.includes(tool))
-  if (filter === 'bridges') return text.includes('bridge') || ['relay', 'jumper', 'debridge', 'tempo_bridge'].some((tool) => item.type.includes(tool))
+  if (filter === 'swaps') return text.includes('swap') || ['smart_swap', 'uniswap', 'pancakeswap'].some((tool) => item.type.includes(tool))
+  if (filter === 'bridges') return text.includes('bridge') || ['relay', 'jumper'].some((tool) => item.type.includes(tool))
   if (filter === 'approvals') return text.includes('approve') || text.includes('approval') || text.includes('allowance')
-  if (filter === 'polymarket') return text.includes('polymarket')
-  if (filter === 'hyperliquid') return text.includes('hyperliquid') || text.includes('hl_')
   return true
 }
 
@@ -215,32 +168,22 @@ export default function DashboardPage() {
   const [me, setMe] = useState<DashboardMe | null>(dashboardSnapshot?.me || null)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>(dashboardSnapshot?.apiKeys || [])
   const [connectorLinks, setConnectorLinks] = useState<ConnectorLink[]>(dashboardSnapshot?.connectorLinks || [])
-  const [automations, setAutomations] = useState<Automation[]>(dashboardSnapshot?.automations || [])
   const [history, setHistory] = useState<HistoryItem[]>(dashboardSnapshot?.history || [])
-  const [sources, setSources] = useState<Source[]>(dashboardSnapshot?.sources || [])
   const [wallets, setWallets] = useState<WalletSummary[]>(dashboardSnapshot?.wallets || [])
   const [walletExportAvailable, setWalletExportAvailable] = useState(dashboardSnapshot?.walletExportAvailable || false)
   const [walletPasswordSet, setWalletPasswordSet] = useState(dashboardSnapshot?.walletPasswordSet || false)
   const [walletPassword, setWalletPassword] = useState('')
   const [walletPasswordConfirm, setWalletPasswordConfirm] = useState('')
   const [walletPrivateKeys, setWalletPrivateKeys] = useState<Record<string, string>>({})
-  const [sourceLimit, setSourceLimit] = useState(dashboardSnapshot?.sourceLimit || 0)
   const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [connectorUrl, setConnectorUrl] = useState('')
   const [newKeyLabel, setNewKeyLabel] = useState('dashboard')
-  const [newSourceHandle, setNewSourceHandle] = useState('')
-  const [newSourceTopics, setNewSourceTopics] = useState('')
-  const [newSourceKeywords, setNewSourceKeywords] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState('')
   const [initializing, setInitializing] = useState(true)
   const [tab, setTab] = useState<Tab>('overview')
 
-  const sourceUsage = useMemo(() => `${sources.length} / ${sourceLimit}`, [sources.length, sourceLimit])
-  const runningAutomations = useMemo(
-    () => automations.filter((automation) => automation.status === 'active' || automation.status === 'paused'),
-    [automations],
-  )
+
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
   const filteredHistory = useMemo(
     () => history.filter((item) => historyMatchesFilter(item, historyFilter)),
@@ -252,10 +195,7 @@ export default function DashboardPage() {
     setMe(null)
     setApiKeys([])
     setConnectorLinks([])
-    setAutomations([])
     setHistory([])
-    setSources([])
-    setSourceLimit(0)
     setWallets([])
     setWalletExportAvailable(false)
     setWalletPasswordSet(false)
@@ -281,19 +221,13 @@ export default function DashboardPage() {
       setInitializing(false)
 
       const nextConnectorLinks = snapshot.connectorLinks || []
-      const nextAutomations = snapshot.automations || []
       const nextHistory = snapshot.history || []
-      const nextSources = snapshot.sources || []
-      const nextSourceLimit = snapshot.sourceLimit || 0
       const nextWallets = snapshot.wallets || []
       const nextWalletExportAvailable = snapshot.walletExportAvailable || false
       const nextWalletPasswordSet = snapshot.walletPasswordSet || false
 
       setConnectorLinks(nextConnectorLinks)
-      setAutomations(nextAutomations)
       setHistory(nextHistory)
-      setSources(nextSources)
-      setSourceLimit(nextSourceLimit)
       setWallets(nextWallets)
       setWalletExportAvailable(nextWalletExportAvailable)
       setWalletPasswordSet(nextWalletPasswordSet)
@@ -301,10 +235,7 @@ export default function DashboardPage() {
         me: meJson,
         apiKeys: snapshot.apiKeys || meJson.apiKeys || [],
         connectorLinks: nextConnectorLinks,
-        automations: nextAutomations,
         history: nextHistory,
-        sources: nextSources,
-        sourceLimit: nextSourceLimit,
         wallets: nextWallets,
         walletExportAvailable: nextWalletExportAvailable,
         walletPasswordSet: nextWalletPasswordSet,
@@ -443,45 +374,6 @@ export default function DashboardPage() {
     }
   }
 
-  async function addSource() {
-    setBusy('source')
-    try {
-      const topics = newSourceTopics.split(',').map((item) => item.trim()).filter(Boolean)
-      const keywords = newSourceKeywords.split(',').map((item) => item.trim()).filter(Boolean)
-      const json = await fetch('/dashboard/sources', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handle: newSourceHandle, topics, keywords }),
-      }).then((res) => readJson<{ sources: Source[] }>(res))
-      setSources(json.sources)
-      setNewSourceHandle('')
-      setNewSourceTopics('')
-      setNewSourceKeywords('')
-      setStatus('Custom source added.')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  async function deleteSource(source: Source) {
-    setBusy(source.id)
-    try {
-      const json = await fetch(`/dashboard/sources/${source.id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      }).then((res) => readJson<{ sources: Source[] }>(res))
-      setSources(json.sources)
-      setStatus('Custom source removed.')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy('')
-    }
-  }
-
   async function saveWalletPassword() {
     if (walletPassword !== walletPasswordConfirm) {
       setStatus('Wallet passwords do not match.')
@@ -498,7 +390,7 @@ export default function DashboardPage() {
       setWalletPassword('')
       setWalletPasswordConfirm('')
       setWalletPasswordSet(true)
-      setStatus('Wallet export password saved on this local AGNT server.')
+      setStatus('Wallet export password saved on this local AGENT server.')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -540,10 +432,11 @@ export default function DashboardPage() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, ...(action === 'signup' ? { code } : {}) }),
       }).then((res) => readJson<{ user: { email?: string } }>(res))
       setPassword('')
       setPasswordConfirm('')
+      setCode('')
       setInitializing(true)
       clearDashboardData()
       await refreshDashboard()
@@ -587,7 +480,7 @@ export default function DashboardPage() {
       setStatus('Enter your wallet export password before deleting a wallet.')
       return
     }
-    const confirmed = window.confirm(`Delete wallet "${wallet.name}"? This removes the stored private key from this local AGNT server.`)
+    const confirmed = window.confirm(`Delete wallet "${wallet.name}"? This removes the stored private key from this local AGENT server.`)
     if (!confirmed) return
 
     setBusy(`delete-wallet-${wallet.name}`)
@@ -608,21 +501,6 @@ export default function DashboardPage() {
         ? { ...dashboardSnapshot, wallets: dashboardSnapshot.wallets.filter((candidate) => candidate.address !== wallet.address) }
         : null
       setStatus(`Deleted wallet "${wallet.name}".`)
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  async function updateAutomation(id: string, action: 'pause' | 'resume' | 'cancel') {
-    setBusy(id)
-    try {
-      await fetch(`/dashboard/automations/${id}/${action}`, {
-        method: 'POST',
-        credentials: 'include',
-      }).then((res) => readJson<{ automation: Automation }>(res))
-      await refreshDashboard()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -687,8 +565,19 @@ export default function DashboardPage() {
                   <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} placeholder="repeat password" />
                 </div>
               )}
+              {authMode === 'signup' && (
+                <>
+                  <button type="button" onClick={sendCode} disabled={busy !== '' || !email}>
+                    {busy === 'send' ? 'Sending...' : 'Send verification code'}
+                  </button>
+                  <div className="dash-field-group">
+                    <label>Verification code</label>
+                    <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" />
+                  </div>
+                </>
+              )}
               {authMode !== 'reset' && (
-                <button type="button" onClick={() => passwordAuth(authMode)} disabled={busy !== '' || !email || !password || (authMode === 'signup' && !passwordConfirm)}>
+                <button type="button" onClick={() => passwordAuth(authMode)} disabled={busy !== '' || !email || !password || (authMode === 'signup' && (!passwordConfirm || !code))}>
                   {busy === authMode ? (authMode === 'signup' ? 'Creating...' : 'Logging in...') : (authMode === 'signup' ? 'Create account' : 'Login')}
                 </button>
               )}
@@ -736,12 +625,7 @@ export default function DashboardPage() {
 
   /* ── Logged in ── */
   const stats = [
-    { label: 'Plan', value: me.plan },
-    { label: 'Status', value: me.subscriptionStatus },
     { label: 'Wallets', value: `${wallets.length}` },
-    { label: 'Automations', value: `${runningAutomations.length} running` },
-    { label: 'Sources', value: sourceUsage },
-    { label: 'Executions', value: `${me.entitlement.executionsMonthly}/mo` },
   ]
 
   const greeting = getGreeting()
@@ -752,14 +636,12 @@ export default function DashboardPage() {
       <main className="dash">
         {/* Top right actions */}
         <div className="dash-topbar">
-          <Link to="/plans" className="dash-btn dash-btn--sm">View Plans</Link>
           <button className="dash-btn dash-btn--sm" onClick={logout} disabled={busy === 'logout'}>{busy === 'logout' ? 'Logging out...' : 'Logout'}</button>
         </div>
 
         {/* Greeting */}
         <section className="dash-greeting">
           <h1>{greeting}, <span>{me.user.email}</span></h1>
-          <span className="dash-plan-pill">{me.plan}</span>
         </section>
 
         {/* Metrics strip */}
@@ -790,8 +672,6 @@ export default function DashboardPage() {
               {([
                 { title: 'Wallets', count: wallets.length, sub: 'local wallets', go: 'wallets' as Tab },
                 { title: 'API Keys', count: apiKeys.length, sub: 'keys created', go: 'keys' as Tab },
-                { title: 'Automations', count: runningAutomations.length, sub: 'running', go: 'automations' as Tab },
-                { title: 'Sources', count: sourceUsage, sub: 'custom sources', go: 'sources' as Tab },
                 { title: 'History', count: history.length, sub: 'events logged', go: 'history' as Tab },
               ]).map((c) => (
                 <button key={c.title} className="dash-tile" onClick={() => setTab(c.go)}>
@@ -879,40 +759,6 @@ export default function DashboardPage() {
             </section>
           )}
 
-          {tab === 'automations' && (
-            <section className="dash-section">
-              <div className="dash-section__bar"><h2>Running Automations</h2></div>
-              <div className="dash-list">
-                {runningAutomations.map((a) => (
-                  <div className="dash-row" key={a.id}>
-                    <div className="dash-row__info"><strong>{a.name}</strong><span><span className={`dash-dot dash-dot--${a.status}`} />{a.status} / {topicFromAutomation(a)} / Last run: {dateText(a.lastRun)}</span></div>
-                    <div className="dash-row__act">
-                      <button className="dash-btn dash-btn--sm" onClick={() => updateAutomation(a.id, a.status === 'active' ? 'pause' : 'resume')} disabled={busy !== ''}>{a.status === 'active' ? 'Pause' : 'Resume'}</button>
-                      <button className="dash-btn dash-btn--sm dash-btn--danger" onClick={() => updateAutomation(a.id, 'cancel')} disabled={busy !== ''}>Cancel</button>
-                    </div>
-                  </div>
-                ))}
-                {runningAutomations.length === 0 && <div className="dash-empty-box"><p className="dash-empty">No running automations.</p><p className="dash-hint">Completed runs are in History.</p></div>}
-              </div>
-            </section>
-          )}
-
-          {tab === 'sources' && (
-            <section className="dash-section">
-              <div className="dash-section__bar"><h2>Custom Sources <span className="dash-count">{sourceUsage}</span></h2></div>
-              <div className="dash-form">
-                <div className="dash-form__row"><input value={newSourceHandle} onChange={(e) => setNewSourceHandle(e.target.value)} placeholder="@handle" /><input value={newSourceTopics} onChange={(e) => setNewSourceTopics(e.target.value)} placeholder="topics (comma sep)" /></div>
-                <div className="dash-form__row"><input value={newSourceKeywords} onChange={(e) => setNewSourceKeywords(e.target.value)} placeholder="keywords (optional)" /><button className="dash-btn" onClick={addSource} disabled={busy !== '' || !newSourceHandle || !newSourceTopics}>Add source</button></div>
-              </div>
-              <div className="dash-list">
-                {sources.map((s) => (
-                  <div className="dash-row" key={s.id}><div className="dash-row__info"><strong>@{s.handle}</strong><span><span className={`dash-dot dash-dot--${s.enabled ? 'active' : 'paused'}`} />{s.enabled ? 'enabled' : 'disabled'} / {s.topics.join(', ')}</span></div><div className="dash-row__act"><button className="dash-btn dash-btn--sm dash-btn--danger" onClick={() => deleteSource(s)} disabled={busy !== ''}>Remove</button></div></div>
-                ))}
-                {sources.length === 0 && <p className="dash-empty">No custom sources added yet.</p>}
-              </div>
-            </section>
-          )}
-
           {tab === 'history' && (
             <section className="dash-section">
               <div className="dash-section__bar">
@@ -950,12 +796,6 @@ export default function DashboardPage() {
 
         {statusBar}
 
-        {(!me.plan || me.plan === 'free') && (
-          <section className="dash-upgrade">
-            <div><strong>Upgrade your plan</strong><span>Unlock automations, auto-execute, and custom sources.</span></div>
-            <Link to="/plans" className="dash-btn">View Plans</Link>
-          </section>
-        )}
       </main>
       <Footer />
     </>

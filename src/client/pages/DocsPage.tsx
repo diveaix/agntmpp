@@ -1,501 +1,220 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import Nav from '../components/Nav'
+import { articles, docGroups } from '../docs/content'
+import { toolReference, type DocTool } from '../docs/tool-reference'
+import type { DocArticle, DocBlock } from '../docs/types'
+import '../docs.css'
 
-/* ── Data ── */
-const SECTIONS = [
-  { id: 'getting-started', label: 'Getting Started', group: 'Start' },
-  { id: 'connection', label: 'Connection', group: 'Start' },
-  { id: 'wallets', label: 'Wallets', group: 'Tools' },
-  { id: 'trading', label: 'Trading', group: 'Tools' },
-  { id: 'perps', label: 'Perpetuals', group: 'Tools' },
-  { id: 'defi', label: 'DeFi & Yield', group: 'Tools' },
-  { id: 'bridges', label: 'Bridges', group: 'Tools' },
-  { id: 'data', label: 'Market Data', group: 'Tools' },
-  { id: 'automation', label: 'Automation', group: 'Advanced' },
-  { id: 'intelligence', label: 'Agent Intelligence', group: 'Advanced' },
-  { id: 'safety', label: 'Safety', group: 'Advanced' },
-  { id: 'chains', label: 'Chains', group: 'Reference' },
-  { id: 'protocols', label: 'Protocols', group: 'Reference' },
-]
+const docUrl = (id: string, section?: string) => `/docs#${id}${section ? `--${section}` : ''}`
 
-interface Tool { name: string; desc: string; protocol: string }
-
-const TOOLS: Record<string, Tool[]> = {
-  wallets: [
-    { name: 'create_wallet', desc: 'Create a named wallet. Works across all EVM chains.', protocol: 'Tempo' },
-    { name: 'list_wallets', desc: 'List all wallets with names and addresses.', protocol: 'Tempo' },
-    { name: 'switch_wallet', desc: 'Switch active wallet by name.', protocol: 'Tempo' },
-    { name: 'rename_wallet', desc: 'Rename a wallet without changing its address.', protocol: 'Tempo' },
-    { name: 'wallet_info', desc: 'Full wallet details and token balances.', protocol: 'Tempo' },
-    { name: 'get_balance', desc: 'Check balance of a specific token.', protocol: 'Tempo' },
-  ],
-  trading: [
-    { name: 'smart_swap', desc: 'Auto-routes to the best pool across Uniswap, PancakeSwap, Aerodrome, Velodrome.', protocol: 'Smart Router' },
-    { name: 'swap_tokens', desc: 'Swap any token pair on Tempo DEX.', protocol: 'Tempo DEX' },
-    { name: 'get_swap_quote', desc: 'Preview swap with full fee breakdown.', protocol: 'Tempo DEX' },
-    { name: 'uniswap_swap', desc: 'Swap on Uniswap V3 (ETH, ARB, BASE, OP, POLY).', protocol: 'Uniswap V3' },
-    { name: 'pancake_swap', desc: 'Swap on PancakeSwap V3 (BSC, ETH, ARB, BASE).', protocol: 'PancakeSwap' },
-    { name: 'jumper_swap', desc: 'Cross-chain swap via LiFi aggregator.', protocol: 'Jumper' },
-    { name: 'dex_intel', desc: 'Discover pairs and liquidity via DexScreener.', protocol: 'DexScreener' },
-    { name: 'swap_any_chain', desc: 'DEX aggregator swap on any EVM chain.', protocol: '1inch' },
-  ],
-  perps: [
-    { name: 'hl_place_order', desc: 'Place limit/market orders on perpetual futures (1-50x leverage).', protocol: 'Hyperliquid' },
-    { name: 'hl_cancel_order', desc: 'Cancel open orders by ID or market.', protocol: 'Hyperliquid' },
-    { name: 'hl_positions', desc: 'View open positions with PnL and liquidation price.', protocol: 'Hyperliquid' },
-    { name: 'hl_orderbook', desc: 'Live L2 orderbook depth for any perp market.', protocol: 'Hyperliquid' },
-    { name: 'hl_account', desc: 'Account summary: value, margin, leverage.', protocol: 'Hyperliquid' },
-    { name: 'hl_markets', desc: 'List markets with funding, volume, OI.', protocol: 'Hyperliquid' },
-    { name: 'hl_set_leverage', desc: 'Set leverage (1-50x), cross or isolated.', protocol: 'Hyperliquid' },
-    { name: 'hl_funding_history', desc: 'View recent funding payments.', protocol: 'Hyperliquid' },
-  ],
-  defi: [
-    { name: 'aave_supply', desc: 'Supply tokens into Aave V3 to earn yield (6 chains).', protocol: 'Aave V3' },
-    { name: 'aave_withdraw', desc: 'Withdraw + earned interest from Aave V3.', protocol: 'Aave V3' },
-    { name: 'lido_stake', desc: 'Stake ETH for stETH/wstETH (~3-4% APY).', protocol: 'Lido' },
-    { name: 'eigen_deposit', desc: 'Restake LSTs into EigenLayer.', protocol: 'EigenLayer' },
-    { name: 'morpho_supply', desc: 'Supply to Morpho optimized vaults.', protocol: 'Morpho' },
-    { name: 'pendle_buy_pt', desc: 'Buy Principal Tokens for fixed yield.', protocol: 'Pendle' },
-    { name: 'pendle_buy_yt', desc: 'Buy Yield Tokens for leveraged yield.', protocol: 'Pendle' },
-    { name: 'ethena_mint', desc: 'Mint USDe via delta-neutral hedging.', protocol: 'Ethena' },
-    { name: 'ondo_mint', desc: 'Mint USDY — tokenized US Treasury yield.', protocol: 'Ondo' },
-    { name: 'get_yield_opportunities', desc: 'Scan best yields across all DeFi.', protocol: 'DefiLlama' },
-  ],
-  bridges: [
-    { name: 'bridge_tokens', desc: 'Bridge USDC.e/EURC.e via Stargate/LayerZero.', protocol: 'Stargate' },
-    { name: 'relay_bridge', desc: 'Ultra-fast bridge via relayers (~10-30s).', protocol: 'Relay' },
-    { name: 'debridge_bridge', desc: 'Decentralized cross-chain bridge.', protocol: 'deBridge' },
-    { name: 'jumper_routes', desc: 'Compare all available cross-chain routes.', protocol: 'Jumper' },
-  ],
-  data: [
-    { name: 'get_price', desc: 'Current price with 24h change and volume.', protocol: 'CoinGecko' },
-    { name: 'get_chart', desc: 'OHLCV candle data (1d-1y timeframes).', protocol: 'CoinGecko' },
-    { name: 'get_funding_rates', desc: 'Cross-venue funding rate comparison.', protocol: 'Hyperliquid' },
-    { name: 'get_gas', desc: 'Gas estimates across all chains.', protocol: 'Multi-chain' },
-    { name: 'defillama_tvl', desc: 'TVL for any protocol or chain.', protocol: 'DefiLlama' },
-    { name: 'dune_query', desc: 'Execute Dune Analytics queries.', protocol: 'Dune' },
-    { name: 'polymarket_markets', desc: 'Browse prediction markets.', protocol: 'Polymarket' },
-  ],
-  automation: [
-    { name: 'create_dca', desc: 'Dollar-cost average: buy X every N hours.', protocol: 'Tempo' },
-    { name: 'create_alert', desc: 'Price alert with auto-trade execution.', protocol: 'Multi-chain' },
-    { name: 'list_automations', desc: 'Show all active DCAs and alerts.', protocol: 'Internal' },
-    { name: 'cancel_automation', desc: 'Stop an automation by ID.', protocol: 'Internal' },
-    { name: 'create_strategy', desc: 'Multi-step composable strategies.', protocol: 'Internal' },
-    { name: 'copy_trade', desc: 'Mirror trades from a whale wallet.', protocol: 'Multi-chain' },
-    { name: 'backtest_strategy', desc: 'Backtest DCA / momentum strategies.', protocol: 'CoinGecko' },
-  ],
-  intelligence: [
-    { name: 'memory_remember', desc: 'Store encrypted key-value facts with tags.', protocol: 'Memory' },
-    { name: 'memory_recall', desc: 'Search memories by keyword.', protocol: 'Memory' },
-    { name: 'memory_history', desc: 'View auto-recorded trade history.', protocol: 'Memory' },
-    { name: 'telegram_send', desc: 'Send messages to Telegram.', protocol: 'Telegram' },
-    { name: 'telegram_alert', desc: 'Formatted alerts with severity levels.', protocol: 'Telegram' },
-    { name: 'get_portfolio', desc: 'Aggregate portfolio across all chains.', protocol: 'Multi-chain' },
-    { name: 'get_pnl', desc: 'Track realized/unrealized PnL.', protocol: 'Multi-chain' },
-    { name: 'resolve_ens', desc: 'Resolve ENS names ↔ addresses.', protocol: 'ENS' },
-  ],
-  safety: [
-    { name: 'revoke_approvals', desc: 'List and revoke token approvals.', protocol: 'Multi-chain' },
-    { name: 'set_spending_limit', desc: 'Set daily USD spending cap.', protocol: 'Internal' },
-    { name: 'emergency_stop', desc: 'Kill switch — pause all automations.', protocol: 'Internal' },
-    { name: 'simulate_tx', desc: 'Dry-run transactions before execution.', protocol: 'Multi-chain' },
-    { name: 'token_security_check', desc: 'Check for honeypot / rug indicators.', protocol: 'GoPlus' },
-    { name: 'export_history', desc: 'Export full trade history report.', protocol: 'Internal' },
-  ],
-}
-
-const CHAINS = [
-  { name: 'Tempo', id: '4217', note: 'Sub-cent gas, ~500ms finality' },
-  { name: 'Ethereum', id: '1', note: 'Mainnet' },
-  { name: 'Base', id: '8453', note: 'Coinbase L2' },
-  { name: 'Arbitrum', id: '42161', note: 'Arbitrum One' },
-  { name: 'Optimism', id: '10', note: 'OP Mainnet' },
-  { name: 'Polygon', id: '137', note: 'Polygon PoS' },
-  { name: 'Avalanche', id: '43114', note: 'C-Chain' },
-  { name: 'BSC', id: '56', note: 'BNB Chain' },
-]
-
-const PROTOCOLS = [
-  { name: 'Tempo DEX', cat: 'Spot', chains: 'Tempo' },
-  { name: 'Hyperliquid', cat: 'Perps', chains: 'Hyperliquid L1' },
-  { name: 'Aave V3', cat: 'Lending', chains: '6 chains' },
-  { name: 'Lido', cat: 'Staking', chains: 'Ethereum' },
-  { name: 'EigenLayer', cat: 'Restaking', chains: 'Ethereum' },
-  { name: 'Ethena', cat: 'Synthetic', chains: 'Ethereum' },
-  { name: 'Morpho', cat: 'Lending', chains: 'ETH, Base' },
-  { name: 'Pendle', cat: 'Yield', chains: 'ETH, ARB' },
-  { name: 'Ondo', cat: 'RWA', chains: 'Ethereum' },
-  { name: 'Uniswap V3', cat: 'DEX', chains: '5 chains' },
-  { name: 'PancakeSwap', cat: 'DEX', chains: '4 chains' },
-  { name: 'Jumper/LiFi', cat: 'Aggregator', chains: '8+ chains' },
-  { name: 'Stargate', cat: 'Bridge', chains: '7+ chains' },
-  { name: 'Relay', cat: 'Bridge', chains: '8+ chains' },
-  { name: 'deBridge', cat: 'Bridge', chains: '12+ chains' },
-  { name: 'DefiLlama', cat: 'Data', chains: 'All' },
-  { name: 'DexScreener', cat: 'Data', chains: 'All' },
-  { name: 'Dune', cat: 'Data', chains: 'All' },
-  { name: 'Polymarket', cat: 'Predictions', chains: 'Polygon' },
-  { name: 'Snapshot', cat: 'Governance', chains: 'Off-chain' },
-]
-
-/* ── Components ── */
-
-function ToolTable({ tools }: { tools: Tool[] }) {
-  return (
-    <div className="d-table">
-      <div className="d-table-head">
-        <span>Tool</span><span>Protocol</span><span>Description</span>
-      </div>
-      {tools.map(t => (
-        <div className="d-table-row" key={t.name}>
-          <code>{t.name}</code>
-          <span className="d-badge">{t.protocol}</span>
-          <span>{t.desc}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function CodeBlock({ label, children }: { label: string; children: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    navigator.clipboard.writeText(children)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+function CodeBlock({ label, language, code }: { label: string; language: string; code: string }) {
+  const [status, setStatus] = useState<'idle' | 'copied' | 'error'>('idle')
+  const resetRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(resetRef.current), [])
+  async function copy() {
+    clearTimeout(resetRef.current)
+    try {
+      await navigator.clipboard.writeText(code)
+      setStatus('copied')
+    } catch { setStatus('error') }
+    resetRef.current = setTimeout(() => setStatus('idle'), 2200)
   }
-  return (
-    <div className="d-code">
-      <div className="d-code-head">
-        <span>{label}</span>
-        <button onClick={copy} className={`d-code-copy${copied ? ' copied' : ''}`}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <pre><code>{children}</code></pre>
-    </div>
-  )
+  return <div className="manual-code">
+    <div className="manual-code-heading"><span>{label}</span><button type="button" onClick={copy} aria-label={`Copy ${label}`} aria-live="polite">{status === 'copied' ? 'Copied ✓' : status === 'error' ? 'Select and copy' : 'Copy'}</button></div>
+    <pre tabIndex={0}><code>{code}</code></pre><div className="manual-code-language">{language}</div>
+  </div>
 }
 
-/* ── Page ── */
+function DocTable({ columns, rows }: { columns: string[]; rows: string[][] }) {
+  return <div className="manual-table" tabIndex={0} role="region" aria-label={`${columns.join(', ')} table`}>
+    <table><thead><tr>{columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+      <tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, i) => i === 0 ? <th scope="row" key={i}>{cell}</th> : <td key={i}>{cell}</td>)}</tr>)}</tbody>
+    </table>
+  </div>
+}
+
+function ToolEntry({ tool }: { tool: DocTool }) {
+  return <section className="manual-tool" id={`tool-reference--${tool.name}`}>
+    <div className="manual-tool-category">{tool.category}</div>
+    <h2><a href={docUrl('tool-reference', tool.name)}>{tool.name}<span aria-hidden="true">#</span></a></h2>
+    <p>{tool.description}</p>
+    <div className="manual-actions" aria-label="Actions">{tool.actions.map(action => <code key={action}>{action}</code>)}</div>
+    <details className="manual-parameters">
+      <summary>Input parameters <span>{tool.parameters.length} fields</span></summary>
+      <div className="manual-parameter-list">{tool.parameters.map(parameter => <div key={parameter.name}>
+        <div className="manual-parameter-name"><code>{parameter.name}</code><span>{parameter.type}</span>{parameter.required && <b>required</b>}</div>
+        <p>{parameter.description}</p>
+        {parameter.values && <div className="manual-parameter-values">{parameter.values.map(value => <code key={value}>{value}</code>)}</div>}
+      </div>)}</div>
+    </details>
+    <CodeBlock label={`${tool.name} · example arguments`} language="json" code={JSON.stringify({ name: tool.name, arguments: tool.example }, null, 2)} />
+    <div className="manual-handler-notes"><h3>Action notes</h3><ul>{tool.notes.map(note => <li key={note}>{note}</li>)}</ul></div>
+    <p className="manual-source">Source <code>{tool.source}</code></p>
+  </section>
+}
+
+function Block({ block, article }: { block: DocBlock; article: DocArticle }) {
+  switch (block.type) {
+    case 'heading': return <h2 className="manual-heading" id={`${article.id}--${block.id}`}><a href={docUrl(article.id, block.id)}>{block.text}<span aria-hidden="true">#</span></a></h2>
+    case 'text': return <p>{block.text}</p>
+    case 'code': return <CodeBlock {...block} />
+    case 'table': return <DocTable {...block} />
+    case 'note': return <aside className="manual-note"><span aria-hidden="true">i</span><div><h3>{block.title}</h3><p>{block.text}</p></div></aside>
+    case 'flow': return <ol className="manual-flow">{block.items.map((item, index) => <li key={item}><span>{String(index + 1).padStart(2, '0')}</span>{item}</li>)}</ol>
+    case 'list': return block.ordered ? <ol className="manual-list manual-list-ordered">{block.items.map(item => <li key={item}>{item}</li>)}</ol> : <ul className="manual-list">{block.items.map(item => <li key={item}>{item}</li>)}</ul>
+    case 'links': return <div className="manual-links">{block.items.map(item => item.href.startsWith('/')
+      ? <Link key={item.href} to={item.href}><span><strong>{item.title}</strong><small>{item.description}</small></span><span aria-hidden="true">↗</span></Link>
+      : <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer"><span><strong>{item.title}</strong><small>{item.description}</small></span><span aria-hidden="true">↗</span></a>)}</div>
+    case 'catalog': return <div className="manual-catalog">{toolReference.map(tool => <ToolEntry tool={tool} key={tool.name} />)}</div>
+  }
+}
+
+// Plain text only: source examples remain inert and are never executed by the docs.
+function blockText(block: DocBlock): string {
+  switch (block.type) {
+    case 'heading': case 'text': return block.text
+    case 'code': return `${block.label} ${block.code}`
+    case 'note': return `${block.title} ${block.text}`
+    case 'table': return [...block.columns, ...block.rows.flat()].join(' ')
+    case 'flow': case 'list': return block.items.join(' ')
+    case 'links': return block.items.map(item => `${item.title} ${item.description}`).join(' ')
+    default: return ''
+  }
+}
+
+const searchable = articles.flatMap(article => {
+  const entries = [{ title: article.title, group: article.group, text: article.description, href: docUrl(article.id) }]
+  let entry = entries[0]
+  article.blocks.forEach(block => {
+    if (block.type === 'heading') {
+      entry = { title: `${article.title.replace(/\.$/, '')} / ${block.text}`, group: article.group, text: '', href: docUrl(article.id, block.id) }
+      entries.push(entry)
+    } else entry.text += ` ${blockText(block)}`
+  })
+  return entries
+}).concat(toolReference.map(tool => ({ title: tool.name, group: 'Tool reference', text: `${tool.description} ${tool.actions.join(' ')} ${tool.parameters.map(p => `${p.name} ${p.description}`).join(' ')} ${tool.notes.join(' ')}`, href: docUrl('tool-reference', tool.name) })))
 
 export default function DocsPage() {
-  const [active, setActive] = useState('getting-started')
-  const [search, setSearch] = useState('')
-  const [query, setQuery] = useState('')   // committed search
-  const contentRef = useRef<HTMLDivElement>(null)
+  const { hash } = useLocation()
+  const rawId = hash.slice(1).split('--')[0]
+  const article = articles.find(item => item.id === rawId) ?? articles[0]
+  const articleIndex = articles.indexOf(article)
+  const [query, setQuery] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [activeHeading, setActiveHeading] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  const articleRef = useRef<HTMLElement>(null)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const headings = useMemo(() => article.id === 'tool-reference'
+    ? toolReference.map(tool => ({ id: `tool-reference--${tool.name}`, text: tool.name }))
+    : article.blocks.flatMap(block => block.type === 'heading' ? [{ id: `${article.id}--${block.id}`, text: block.text }] : []), [article])
+  const words = article.blocks.map(blockText).join(' ').split(/\s+/).length
+  const results = useMemo(() => {
+    const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
+    if (!terms.length) return []
+    return searchable.filter(entry => terms.every(term => `${entry.title} ${entry.text}`.toLowerCase().includes(term)))
+      .sort((a, b) => Number(b.title.toLowerCase().includes(query.toLowerCase().trim())) - Number(a.title.toLowerCase().includes(query.toLowerCase().trim())))
+  }, [query])
 
-  // Intersection observer for active section tracking
   useEffect(() => {
-    const obs = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) { setActive(e.target.id); break }
-      }
-    }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 })
-    SECTIONS.forEach(s => {
-      const el = document.getElementById(s.id)
-      if (el) obs.observe(el)
+    const oldTitle = document.title
+    document.title = `${article.title.replace(/\.$/, '')} — AGENT Docs`
+    return () => { document.title = oldTitle }
+  }, [article])
+
+  useEffect(() => {
+    setQuery('')
+    setMenuOpen(false)
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(hash.slice(1))
+      if (hash.includes('--') && target) target.scrollIntoView({ block: 'start', behavior: 'instant' })
+      else window.scrollTo({ top: 0, behavior: 'instant' })
     })
-    return () => obs.disconnect()
-  }, [])
+    return () => cancelAnimationFrame(frame)
+  }, [hash])
 
-  // Scroll-reveal
   useEffect(() => {
-    const obs = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('d-in') })
-    }, { threshold: 0.08 })
-    document.querySelectorAll('.d-reveal').forEach(el => obs.observe(el))
-    return () => obs.disconnect()
+    const observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting)
+      if (visible.length) setActiveHeading(visible[0].target.id)
+    }, { rootMargin: '-100px 0px -65% 0px' })
+    setActiveHeading(headings[0]?.id ?? '')
+    headings.forEach(heading => {
+      const target = document.getElementById(heading.id)
+      if (target) observer.observe(target)
+    })
+    return () => observer.disconnect()
+  }, [headings])
+
+  useEffect(() => {
+    const sidebar = sidebarRef.current
+    const selected = sidebar?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (!sidebar?.clientHeight || !selected) return
+    const top = selected.offsetTop
+    if (top < sidebar.scrollTop || top + selected.offsetHeight > sidebar.scrollTop + sidebar.clientHeight) {
+      sidebar.scrollTop = Math.max(0, top - sidebar.clientHeight / 2)
+    }
+  }, [article.id])
+
+  useEffect(() => {
+    function shortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.scrollIntoView({ block: 'center' })
+      }
+      if (event.key === 'Escape') { setQuery(''); setMenuOpen(false) }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
   }, [])
 
-  const scrollTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+  function selectResult() {
+    setQuery('')
+    requestAnimationFrame(() => articleRef.current?.focus({ preventScroll: true }))
   }
 
-  // Search logic
-  const q = query.toLowerCase().trim()
-
-  const matchTool = (t: Tool) =>
-    !q || t.name.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q) || t.protocol.toLowerCase().includes(q)
-
-  const filteredTools: Record<string, Tool[]> = {}
-  for (const [cat, tools] of Object.entries(TOOLS)) {
-    filteredTools[cat] = tools.filter(matchTool)
-  }
-
-  const filteredChains = CHAINS.filter(c =>
-    !q || c.name.toLowerCase().includes(q) || c.note.toLowerCase().includes(q)
-  )
-  const filteredProtocols = PROTOCOLS.filter(p =>
-    !q || p.name.toLowerCase().includes(q) || p.cat.toLowerCase().includes(q) || p.chains.toLowerCase().includes(q)
-  )
-
-  // Which sections have results?
-  const sectionHasResults = (id: string): boolean => {
-    if (!q) return true
-    if (id === 'getting-started' || id === 'connection') return !q // hide when searching
-    if (id === 'chains') return filteredChains.length > 0
-    if (id === 'protocols') return filteredProtocols.length > 0
-    const cat = SECTIONS.find(s => s.id === id)
-    if (!cat) return false
-    const toolCatMap: Record<string, string> = {
-      wallets: 'wallets', trading: 'trading', perps: 'perps',
-      defi: 'defi', bridges: 'bridges', data: 'data',
-      automation: 'automation', intelligence: 'intelligence', safety: 'safety',
-    }
-    const toolKey = toolCatMap[id]
-    return toolKey ? (filteredTools[toolKey]?.length ?? 0) > 0 : false
-  }
-
-  const doSearch = () => {
-    setQuery(search)
-    // scroll to first matching section
-    if (search.trim()) {
-      setTimeout(() => {
-        const first = SECTIONS.find(s => sectionHasResults(s.id) && s.id !== 'getting-started' && s.id !== 'connection')
-        if (first) scrollTo(first.id)
-      }, 50)
-    }
-  }
-
-  // Group sections for sidebar
-  const groups = SECTIONS.reduce<Record<string, typeof SECTIONS>>((acc, s) => {
-    ;(acc[s.group] ??= []).push(s)
-    return acc
-  }, {})
-
-  return (
-    <>
-      <Nav />
-      <main className="d-layout">
-        {/* ─── Sidebar Rail ─── */}
-        <aside className="d-rail" aria-label="Documentation navigation">
-          <div className="d-rail-inner">
-            <a className="d-brand" href="/">
-              <img src="/AGNT.svg" alt="AGNT" className="d-brand-logo" />
-              <span>AGNT DOCS</span>
-            </a>
-            {Object.entries(groups).map(([group, items]) => (
-              <div className="d-nav-group" key={group}>
-                <div className="d-nav-title">{group}</div>
-                {items.map(s => (
-                  <button
-                    key={s.id}
-                    className={`d-nav-link${active === s.id ? ' active' : ''}${q && !sectionHasResults(s.id) ? ' dimmed' : ''}`}
-                    onClick={() => scrollTo(s.id)}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
+  return <div className="manual-page">
+    <Nav />
+    <a className="manual-skip" href="#manual-article" onClick={event => { event.preventDefault(); articleRef.current?.focus(); articleRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }) }}>Skip to article</a>
+    <div className="manual-shell">
+      <header className="manual-topbar">
+        <Link className="manual-wordmark" to="/docs"><img src="/dotslashagent.svg?v=2" alt="" /><span>AGENT <b> / Docs</b></span></Link>
+        <div className="manual-search">
+          <span className="manual-search-icon" aria-hidden="true">⌕</span>
+          <input ref={searchRef} type="search" aria-label="Search documentation" aria-controls={query.trim() ? 'manual-search-results' : undefined} placeholder="Search guides, tools, and concepts…" value={query} onChange={event => setQuery(event.target.value)} />
+          {query ? <button type="button" aria-label="Clear search" onClick={() => { setQuery(''); searchRef.current?.focus() }}>×</button> : <kbd>Ctrl K</kbd>}
+          {query.trim() && <div className="manual-search-results" id="manual-search-results">
+            <p role="status">{results.length ? `${results.length} results${results.length > 12 ? ' · showing the first 12' : ''}` : 'No matches. Try a tool name, network, or action.'}</p>
+            {results.slice(0, 12).map(result => <Link key={result.href} to={result.href} onClick={selectResult}><small>{result.group}</small><strong>{result.title}</strong><span>{result.text.trim().slice(0, 145)}…</span></Link>)}
+          </div>}
+        </div>
+        <span className="manual-edition">Developer manual <span>v2.1</span></span>
+      </header>
+      <div className="manual-mobile-bar"><span>{article.group}</span><button type="button" aria-expanded={menuOpen} aria-controls="manual-sidebar" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? 'Close contents −' : 'Browse docs +'}</button></div>
+      <div className="manual-layout">
+        <aside ref={sidebarRef} className={`manual-sidebar${menuOpen ? ' is-open' : ''}`} id="manual-sidebar" aria-label="Documentation navigation">
+          {docGroups.map(group => <div className="manual-nav-group" key={group}><h2>{group}</h2>{articles.filter(item => item.group === group).map(item => <Link key={item.id} to={docUrl(item.id)} aria-current={article.id === item.id ? 'page' : undefined} onClick={() => setMenuOpen(false)}>{item.title.replace(/\.$/, '')}</Link>)}</div>)}
+          <Link className="manual-sidebar-cta" to="/toolkit">Open the toolkit <span aria-hidden="true">↗</span></Link>
         </aside>
-
-        {/* ─── Content ─── */}
-        <article className="d-content" ref={contentRef}>
-          <div className="d-paper">
-
-            {/* Hero */}
-            <header className="d-hero d-reveal" id="getting-started">
-              <div className="d-eyebrow">Documentation</div>
-              <h1>The operator manual for autonomous&nbsp;agents.</h1>
-              <p className="d-lead">102+ tools. 20+ protocols. One URL. Find a command, understand the risk, copy a working setup.</p>
-              <div className="d-search">
-                <span className="d-search-slash">/</span>
-                <input
-                  aria-label="Search docs"
-                  placeholder="Search wallets, swaps, safety, memory…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') doSearch() }}
-                />
-                <button type="button" onClick={doSearch}>Search</button>
-              </div>
-              {q && (
-                <div className="d-search-status">
-                  Showing results for "<strong>{q}</strong>"
-                  <button className="d-search-clear" onClick={() => { setQuery(''); setSearch('') }}>Clear</button>
-                </div>
-              )}
+        <main className="manual-content" ref={articleRef} id="manual-article" tabIndex={-1}>
+          <article key={article.id}>
+            <header className="manual-hero" id={article.id}>
+              <div className="manual-breadcrumb"><Link to="/docs">Docs</Link><span>/</span><span>{article.group}</span></div>
+              <h1>{article.title}</h1><p>{article.description}</p>
+              <div className="manual-meta"><span>{article.id === 'tool-reference' ? `${toolReference.length} tools · ${toolReference.reduce((sum, tool) => sum + tool.parameters.length, 0)} parameters` : `${Math.max(2, Math.ceil(words / 200))} min read`}</span><span>{article.id === 'tool-reference' ? 'Schema reference' : `${headings.length} sections`}</span></div>
             </header>
-
-            {/* Quick Start Callout */}
-            {!q && (
-              <div className="d-callout d-reveal">
-                <div className="d-callout-inner">
-                  <strong>Quick Start</strong>
-                  <p>Create an AGNT account, generate an API key or connector URL from the dashboard, then add the MCP endpoint to your agent.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Connection */}
-            {!q && (
-              <section className="d-section d-reveal" id="connection">
-                <h2>Connection</h2>
-                <p>Add one of these to your agent's MCP config after creating an API key or connector URL.</p>
-
-                <div className="d-callout">
-                  <div className="d-callout-inner">
-                    <strong>Hosted endpoint</strong>
-                    <p>Use SSE for most agent clients. Use streamable HTTP where the host asks for it. Self-hosting is available as a secondary trust path.</p>
-                  </div>
-                </div>
-
-                <CodeBlock label="Claude Code">
-                  {`claude mcp add agnt --transport sse "https://mcp.agntmpp.xyz/sse?agnt_connector_token=<your connector token>"`}
-                </CodeBlock>
-                <CodeBlock label="Cursor / Windsurf / Amp">
-{`{
-  "mcpServers": {
-    "agnt": {
-      "url": "https://mcp.agntmpp.xyz/sse?agnt_connector_token=<your connector token>"
-    }
-  }
-}`}
-                </CodeBlock>
-                <CodeBlock label="Self-hosted">
-                  {`npx @anthropic-ai/sdk mcp agnt --url http://localhost:3001/sse`}
-                </CodeBlock>
-              </section>
-            )}
-
-            {/* Wallets */}
-            {sectionHasResults('wallets') && (
-              <section className="d-section d-reveal" id="wallets">
-                <h2>Wallets</h2>
-                <p>Named wallets that work across every EVM chain. One key, every network.</p>
-                <ToolTable tools={q ? filteredTools.wallets : TOOLS.wallets} />
-              </section>
-            )}
-
-            {/* Trading */}
-            {sectionHasResults('trading') && (
-              <section className="d-section d-reveal" id="trading">
-                <h2>Trading</h2>
-                <p>Spot swaps across Tempo, Uniswap, PancakeSwap, Aerodrome, Velodrome — with Smart Routing for best execution.</p>
-                <ToolTable tools={q ? filteredTools.trading : TOOLS.trading} />
-              </section>
-            )}
-
-            {/* Perpetuals */}
-            {sectionHasResults('perps') && (
-              <section className="d-section d-reveal" id="perps">
-                <h2>Perpetuals</h2>
-                <p>Trade perpetual futures on Hyperliquid with up to 50x leverage.</p>
-                <ToolTable tools={q ? filteredTools.perps : TOOLS.perps} />
-              </section>
-            )}
-
-            {/* DeFi & Yield */}
-            {sectionHasResults('defi') && (
-              <section className="d-section d-reveal" id="defi">
-                <h2>DeFi &amp; Yield</h2>
-                <p>Lending, staking, restaking, and yield tokenization across top protocols.</p>
-                <ToolTable tools={q ? filteredTools.defi : TOOLS.defi} />
-              </section>
-            )}
-
-            {/* Bridges */}
-            {sectionHasResults('bridges') && (
-              <section className="d-section d-reveal" id="bridges">
-                <h2>Bridges</h2>
-                <p>Cross-chain transfers via Stargate, Relay, deBridge, and Jumper/LiFi.</p>
-                <ToolTable tools={q ? filteredTools.bridges : TOOLS.bridges} />
-              </section>
-            )}
-
-            {/* Market Data */}
-            {sectionHasResults('data') && (
-              <section className="d-section d-reveal" id="data">
-                <h2>Market Data</h2>
-                <p>Real-time prices, charts, gas, on-chain analytics, and prediction markets.</p>
-                <ToolTable tools={q ? filteredTools.data : TOOLS.data} />
-              </section>
-            )}
-
-            {/* Automation */}
-            {sectionHasResults('automation') && (
-              <section className="d-section d-reveal" id="automation">
-                <h2>Automation</h2>
-                <p>DCA strategies, price alerts, copy trading, and composable multi-step strategies.</p>
-                <ToolTable tools={q ? filteredTools.automation : TOOLS.automation} />
-              </section>
-            )}
-
-            {/* Agent Intelligence */}
-            {sectionHasResults('intelligence') && (
-              <section className="d-section d-reveal" id="intelligence">
-                <h2>Agent Intelligence</h2>
-                <p>Persistent memory, Telegram notifications, portfolio tracking, and ENS resolution.</p>
-                <ToolTable tools={q ? filteredTools.intelligence : TOOLS.intelligence} />
-              </section>
-            )}
-
-            {/* Safety */}
-            {sectionHasResults('safety') && (
-              <section className="d-section d-reveal" id="safety">
-                <h2>Safety</h2>
-                <p>Spending limits, approval revocation, transaction simulation, and kill switches.</p>
-                {!q && (
-                  <div className="d-callout">
-                    <div className="d-callout-inner">
-                      <strong>Recommended default</strong>
-                      <p>Show spending limits and simulation status near every executable action. Make disabled states explicit when a wallet or route is missing.</p>
-                    </div>
-                  </div>
-                )}
-                <ToolTable tools={q ? filteredTools.safety : TOOLS.safety} />
-              </section>
-            )}
-
-            {/* Chains */}
-            {sectionHasResults('chains') && (
-              <section className="d-section d-reveal" id="chains">
-                <h2>Supported Chains</h2>
-                <div className="d-chain-grid">
-                  {(q ? filteredChains : CHAINS).map(c => (
-                    <div className="d-chain-card" key={c.name}>
-                      <span className="d-chain-name">{c.name}</span>
-                      <span className="d-chain-id">Chain {c.id}</span>
-                      <span className="d-chain-note">{c.note}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Protocols */}
-            {sectionHasResults('protocols') && (
-              <section className="d-section d-reveal" id="protocols">
-                <h2>Integrated Protocols</h2>
-                <div className="d-table">
-                  <div className="d-table-head">
-                    <span>Protocol</span><span>Category</span><span>Chains</span>
-                  </div>
-                  {(q ? filteredProtocols : PROTOCOLS).map(p => (
-                    <div className="d-table-row" key={p.name}>
-                      <strong>{p.name}</strong>
-                      <span className="d-badge">{p.cat}</span>
-                      <span>{p.chains}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* No results */}
-            {q && !SECTIONS.some(s => sectionHasResults(s.id)) && (
-              <div className="d-no-results">
-                <p>No tools, chains, or protocols match "<strong>{q}</strong>"</p>
-                <button onClick={() => { setQuery(''); setSearch('') }}>Clear search</button>
-              </div>
-            )}
+            <div className="manual-body">{article.blocks.map((block, index) => <Block key={index} block={block} article={article} />)}</div>
+          </article>
+          <div className="manual-pager">
+            {articleIndex > 0 ? <Link to={docUrl(articles[articleIndex - 1].id)}><small>← Previous</small><span>{articles[articleIndex - 1].title}</span></Link> : <span />}
+            {articleIndex < articles.length - 1 && <Link to={docUrl(articles[articleIndex + 1].id)}><small>Next →</small><span>{articles[articleIndex + 1].title}</span></Link>}
           </div>
-        </article>
-      </main>
-    </>
-  )
+          <footer className="manual-bottom"><span>./AGENT · Developer documentation</span><button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'instant' })}>Back to top ↑</button></footer>
+        </main>
+        <aside className="manual-toc" aria-label="On this page"><h2>On this page</h2>{headings.map(heading => <Link key={heading.id} to={`/docs#${heading.id}`} aria-current={activeHeading === heading.id ? 'location' : undefined}>{heading.text.replace(/\.$/, '')}</Link>)}<div className="manual-toc-footer"><span>One connection.</span><span>Three wallets.</span><Link to="/docs#architecture">Explore the architecture ↗</Link></div></aside>
+      </div>
+    </div>
+  </div>
 }

@@ -1,5 +1,5 @@
 /**
- * ./AGNT Protocol — Transaction Executor
+ * ./AGENT Protocol — Transaction Executor
  *
  * Shared helpers for signing & sending on-chain transactions via viem.
  * Used by all DeFi tools (Aave, Uniswap, Lido, etc.) for real execution.

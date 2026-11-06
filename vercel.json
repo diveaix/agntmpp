@@ -1,10 +1,11 @@
 {
+  "redirects": [
+    { "source": "/dashboard/:path*", "destination": "/toolkit", "permanent": false },
+    { "source": "/checkout", "destination": "/toolkit", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/toolkit", "destination": "/index.html" },
     { "source": "/presale", "destination": "/index.html" },
-    { "source": "/plans", "destination": "/index.html" },
-    { "source": "/checkout", "destination": "/index.html" },
-    { "source": "/dashboard", "destination": "/index.html" },
     { "source": "/waitlist", "destination": "/index.html" },
     { "source": "/docs", "destination": "/index.html" }
   ]

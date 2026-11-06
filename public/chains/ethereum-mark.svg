@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="163 106 186 300">
+  <!-- Ethereum facets reused from capability-icons.ts, with light tones for the dark screen. -->
+  <path fill="#eeeeea" d="M256 106L163 256L256 214Z" />
+  <path fill="#aaa" d="M256 106L256 214L349 256Z" />
+  <path fill="#bdbdb9" d="M163 256L256 214L256 311Z" />
+  <path fill="#777" d="M256 214L349 256L256 311Z" />
+  <path fill="#eeeeea" d="M163 281L256 334L256 406Z" />
+  <path fill="#aaa" d="M349 281L256 406L256 334Z" />
+</svg>

@@ -1,11 +1,11 @@
-# AGNT MPP
+# AGENT
 
-AGNT is an agent-native DeFi MCP server and web dashboard for wallets, swaps, bridges, Polymarket, Hyperliquid, market data, and automations.
+AGENT is an agent-native DeFi MCP server and web dashboard for EVM wallets, swaps, bridges, lending, market data. Zcash gateway support is planned, not live.
 
 The product has two local surfaces:
 
 - MCP server: exposes tools to agent clients over Streamable HTTP and legacy SSE.
-- Web app: dashboard, toolkit, plans, docs, and checkout UI.
+- Web app: dashboard, toolkit, and docs UI.
 
 ## Run Locally
 
@@ -45,6 +45,7 @@ Default local URLs:
 - MCP: `http://localhost:3001/mcp`
 - SSE: `http://localhost:3001/sse`
 - Health: `http://localhost:3001/health`
+- Readiness: `http://localhost:3001/ready`
 - Pricing: `http://localhost:3001/pricing`
 
 ## Agent Client Setup
@@ -58,7 +59,7 @@ http://localhost:3001/mcp
 Use this header:
 
 ```text
-x-agnt-api-key: <your AGNT API key>
+x-agnt-api-key: <your AGENT API key>
 ```
 
 For clients that cannot set headers, generate a connector URL from the dashboard and use that URL directly.
@@ -69,13 +70,20 @@ Wallets are encrypted at rest and scoped to the authenticated user id. Reconnect
 
 Transaction tools do not create fallback execution wallets. Create or switch to a user wallet before sending swaps, bridges, approvals, or trades.
 
+## Supported Networks
+
+The EVM registry contains Ethereum, Arbitrum, Base, Optimism, Polygon, Avalanche, Abstract, BNB Chain, Linea, and zkSync Era. Tool and protocol support varies by network. Base is the default wallet network.
+
+Automation creation and background execution have been removed. Existing history remains readable.
+
+## Account Access
+
+Account access uses API keys or connector URLs. Checkout and paid plans have been removed.
+
 ## Useful Checks
 
 ```bash
-npx tsc --noEmit
-node --import tsx/esm --test src/mcp/tools/wallet-scope.test.ts
-node --import tsx/esm --test src/mcp/tools/payments-access.test.ts
-npm run build
+npm run check
 ```
 
 ## Local Smoke Checklist
@@ -91,15 +99,40 @@ npm run build
 
 ## Production Notes
 
-Do not commit `.env`, `.agnt/`, encrypted wallet files, logs, or build output.
+The supported production topology is currently one MCP process/replica with a persistent encrypted `.agnt` volume. Horizontal replicas require replacing the file stores with a transactional database and distributed scheduler/locking first.
+
+Copy `.env.example`, then set at minimum:
+
+- `NODE_ENV=production`
+- a unique `AGNT_PASSPHRASE` of at least 32 characters
+- `AGNT_ALLOWED_ORIGINS` to the exact public dashboard origin(s)
+- `AGNT_SINGLE_INSTANCE=true`
+- `AGNT_EMAIL_PROVIDER=webhook` and `AGNT_EMAIL_WEBHOOK_URL`
+
+The email webhook receives `{ to, template, code, expiresAt }` as JSON. If `AGNT_EMAIL_WEBHOOK_SECRET` is set, it is sent as a Bearer token.
+
+Live transaction execution is off by default in production. Enable `AGNT_LIVE_EXECUTION_ENABLED=true` only after wallet funding, RPC, monitoring, incident response, and transaction policy review. This gate controls explicit transaction tools.
+
+Build and run the MCP backend and web proxy as separate supervised processes:
+
+```bash
+npm ci
+npm run check
+npm run mcp:serve
+npm run start:web
+```
+
+Use `/health` for liveness and `/ready` for readiness. Termination signals flush memory and drain HTTP connections.
+
+Do not commit `.env`, `.agnt/`, encrypted wallet files, logs, build output, or wallet recovery exports.
 
 Hosted deployments need persistent storage or external encrypted storage for:
 
 - access store
 - wallet vaults
 - wallet export password vaults
-- automations
+- legacy automation history, if present
 - activity logs
-- payment/session tracking
+- historical payment records and call tracking
 
 Use a strong `AGNT_PASSPHRASE` in every environment. Losing or changing it can make encrypted local state unreadable.
